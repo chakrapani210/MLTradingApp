@@ -1,322 +1,430 @@
-# ML Trading Application Configuration
-# ===================================
+# ML Trading Application Configuration - New Architecture
+# =====================================================
+# Updated: January 2025
+# Architecture: Clean, modular, production-ready
 
+# Application Metadata
+application:
+  name: "ML Trading System"
+  version: "2.0.0"
+  environment: "development"  # development, staging, production
+  
 # Trading Configuration
 trading:
-  # List of stocks to analyze and trade
-  symbols: 
-    - "TSLA"    # Tesla
-    - "AAPL"    # Apple
-    - "NVDA"    # NVIDIA
-    - "MSFT"    # Microsoft
-    - "GOOGL"   # Google
+  # Supported assets
+  assets:
+    stocks:
+      - symbol: "AAPL"
+        name: "Apple Inc."
+        sector: "technology"
+        market_cap: "large"
+        volatility_class: "medium"
+      - symbol: "TSLA" 
+        name: "Tesla Inc."
+        sector: "automotive"
+        market_cap: "large"
+        volatility_class: "high"
+      - symbol: "MSFT"
+        name: "Microsoft Corp."
+        sector: "technology"
+        market_cap: "large"
+        volatility_class: "low"
+      - symbol: "NVDA"
+        name: "NVIDIA Corp."
+        sector: "technology"
+        market_cap: "large"
+        volatility_class: "high"
+      - symbol: "GOOGL"
+        name: "Alphabet Inc."
+        sector: "technology"
+        market_cap: "large"
+        volatility_class: "medium"
   
-  # Default symbol for single-stock analysis
-  default_symbol: "TSLA"
-  
-  # Trading parameters
-  shares_per_trade: 20
-  market_impact: 0.005  # 0.5% market impact
-  
-  # Technical Indicators Configuration
-  indicators:
-    # Moving Averages
-    sma_short: 20   # Short-term Simple Moving Average
-    sma_long: 50   # Long-term Simple Moving Average
-    
-    # RSI Configuration
-    rsi_period: 14
-    rsi_overbought: 70
-    rsi_oversold: 30
-    
-    # Bollinger Bands Configuration
-    bollinger_period: 20
-    bollinger_std: 2
-    
-    # MACD Configuration
-    macd_fast: 12
-    macd_slow: 26
-    macd_signal: 9
-    
-    # Golden Cross Pattern Detection
-    golden_cross:
-      enabled: true
-      short_window: 20  # Short-term SMA for golden cross
-      long_window: 50   # Long-term SMA for golden cross
-      confirmation_days: 3  # Days to confirm crossover
-      strength_threshold: 0.6  # Minimum strength score (0-1)
-      volume_confirmation: false  # Require volume confirmation
-      trend_consistency_days: 10  # Days to check trend consistency
-    
-    # Other Technical Indicators
-    bollinger_period: 20
-    bollinger_std: 2
-    macd_fast: 12
-    macd_slow: 26
-    macd_signal: 9
-  
-  # Auto Order Size Management
-  order_sizing:
-    # Order sizing strategy: 'fixed', 'percentage', 'volatility_adjusted', 'kelly_criterion', 'risk_parity'
-    strategy: 'volatility_adjusted'
-    
-    # Fixed sizing (strategy: 'fixed')
-    fixed:
-      shares: 20
-    
-    # Percentage of portfolio (strategy: 'percentage')
-    percentage:
-      portfolio_pct: 0.05  # 5% of portfolio per trade
-      min_shares: 1
-      max_shares: 100
-    
-    # Volatility-adjusted sizing (strategy: 'volatility_adjusted')
-    volatility_adjusted:
-      base_shares: 20
-      volatility_window: 20  # Days to calculate volatility
-      volatility_target: 0.02  # 2% target volatility
-      min_shares: 5
-      max_shares: 200
-      adjustment_factor: 1.5  # Multiplier for volatility adjustment
-    
-    # Kelly Criterion sizing (strategy: 'kelly_criterion')
-    kelly_criterion:
-      base_portfolio_pct: 0.10  # 10% base allocation
-      win_rate: 0.55  # Estimated win rate
-      avg_win: 0.08   # Average win percentage
-      avg_loss: 0.06  # Average loss percentage
-      min_shares: 1
-      max_shares: 150
-      kelly_fraction: 0.25  # Fraction of Kelly to use (conservative)
-    
-    # Risk Parity sizing (strategy: 'risk_parity')
-    risk_parity:
-      portfolio_risk_budget: 0.15  # 15% portfolio risk per trade
-      lookback_days: 30
-      min_shares: 1
-      max_shares: 100
-    
-    # Dynamic sizing based on market conditions
-    market_conditions:
-      enabled: true
-      bull_market_multiplier: 1.2   # Increase size in bull markets
-      bear_market_multiplier: 0.7   # Decrease size in bear markets
-      high_vix_threshold: 25        # VIX threshold for high volatility
-      low_vix_threshold: 15         # VIX threshold for low volatility
-      vix_adjustment_factor: 0.1    # How much to adjust based on VIX
-    
-    # Position sizing limits
-    limits:
-      max_position_pct: 0.20        # Maximum 20% of portfolio in single position
-      max_daily_trades: 10          # Maximum trades per day
-      max_portfolio_heat: 0.50      # Maximum 50% of portfolio at risk
-  
-  # Position tracking files (will be created as {symbol}.txt)
-  position_file_extension: ".txt"
-
-# Model Management Configuration
-model_management:
-  # Model storage settings
-  models_base_path: "models"
-  
-  # Version management
-  max_versions_per_symbol: 5  # Keep only 5 versions per symbol
-  auto_cleanup: true          # Automatically cleanup old versions
-  
-  # Model training settings
-  auto_save_models: true      # Automatically save trained models
-  use_model_cache: true       # Cache models in memory for faster predictions
-  
-  # Model validation settings
-  validation_split: 0.2       # Use 20% of training data for validation
-  min_training_accuracy: 0.6  # Minimum acceptable training accuracy
-  
-  # Real-time prediction settings
-  prediction_service:
-    enabled: true               # Use prediction service for real-time predictions
-    confidence_threshold: 0.7   # Minimum confidence for predictions
-    cache_predictions: true     # Cache recent predictions
-  
-  # Model retraining triggers
-  retraining:
-    performance_threshold: 0.05  # Retrain if accuracy drops by 5%
-    days_since_training: 30      # Retrain if model is older than 30 days
-    market_regime_change: true   # Retrain on significant market regime changes
-
-# Data Configuration
-data:
-  # Training data periods (in months)
-  training_period_months: 12  # Optimal: 12 months based on analysis
-  
-  # Testing/simulation periods
-  simulation:
-    # For backtesting - can be overridden for specific analysis
-    start_date: "2025-07-01"
-    end_date: "2025-12-31"
-  
-  # Live trading data periods
-  live_trading:
-    # How many days back to get recent data for prediction
-    lookback_days: 30
-    
-  # Historical analysis periods
-  analysis:
-    # Different test periods for comprehensive analysis
-    tesla_analysis:
-      train_start: "2020-01-01"
-      train_end: "2025-07-01"  
-      test_start: "2025-07-01"
-      test_end: "2025-12-31"
-    
-    tqqq_analysis:
-      train_start: "2015-01-01"
-      train_end: "2019-01-01"
-      test_start: "2019-05-05" 
-      test_end: "2020-01-01"
-    
-    sqqq_analysis:
-      train_start: "2020-01-01"
-      train_end: "2025-07-01"
-      test_start: "2025-07-01"
-      test_end: "2025-12-31"
-
-# Technical Indicators Configuration  
-indicators:
-  # Window size for technical indicators
-  window: 5
-  
-  # Which indicators to use (true = include, false = exclude)
-  use_sma: true
-  use_bollinger_bands: true
-  use_momentum: true
-  use_volatility: true
-  use_macd: true
-  
-  # Market context indicators (NEW!)
-  use_market_context: true
-  market_indices: ["SPY", "QQQ"]  # Market indices for context
-  use_spy_trend: true
-  use_qqq_trend: true
-  use_relative_strength: true
-  use_beta_features: true
-  use_market_volatility_regime: true
-  use_sector_rotation: true
-  use_market_breadth: true
-  
-  # Which Bollinger Band components to drop (to avoid multicollinearity)
-  drop_upper_bb: true
-  drop_lower_bb: true
-  keep_bb_value: true  # Normalized Bollinger Band position
-
-# Enhanced ML Model Configuration
-ml_model:
-  # Model type and parameters
-  algorithm: "DecisionTree"  # Options: DecisionTree, RandomForest
-  max_depth: 5
-  random_state: 42
-  
-  # For RandomForest (if used)
-  n_estimators: 100
-  
-  # Training thresholds
-  min_training_samples: 100
-  min_labels_required: 20
-  
-  # Enhanced features configuration
-  use_enhanced_features: true
-  feature_selection: "auto"  # auto, manual, importance_based
-  
-  # Retraining configuration
-  retraining:
-    # Default retraining frequency (in trading days)
-    default_frequency: 10  # Bi-weekly based on analysis
-    
-    # Stock-specific frequencies
-    high_volatility_frequency: 5   # Weekly for volatile stocks
-    medium_volatility_frequency: 10 # Bi-weekly for medium volatility
-    low_volatility_frequency: 22   # Monthly for stable stocks
-    
-    # Volatility thresholds for categorization
-    high_volatility_threshold: 0.8  # 80th percentile
-    medium_volatility_threshold: 0.4 # 40th percentile
-    
-    # Performance-based triggers
-    accuracy_threshold: 0.30  # Retrain if accuracy drops below 30%
-    
-# Portfolio Configuration
-portfolio:
-  # Starting portfolio value for simulations
-  starting_value: 3000
-  
-  # Risk management
-  commission: 0.0  # Commission per trade
-  impact: 0.005    # Market impact (same as market_impact above)
+  # Default configurations
+  default_symbol: "AAPL"
+  default_timeframe: "1d"  # 1d, 1h, 4h
   
   # Position sizing
-  max_position_size: 20  # Maximum shares per position
-  
-# Robinhood Configuration (for live trading)
-robinhood:
-  # Login credentials (should be set via environment variables in production)
-  username: "username@gmail.com"
-  password: "P@ssw0rd" 
-  qr_code: "123456789qwertyu"  # 2FA QR code
-  
-  # Trading parameters
-  order_type: "market"  # market or limit
-  time_in_force: "GFD"  # Good For Day
-  
-  # Safety settings
-  enable_live_trading: false  # Set to true only when ready for live trading
-  paper_trading: true         # Use paper trading for testing
+  position_sizing:
+    method: "fixed_percentage"  # fixed_amount, fixed_percentage, volatility_adjusted
+    default_percentage: 0.10    # 10% of portfolio per position
+    max_percentage: 0.20        # Maximum 20% per position
+    min_position_value: 100     # Minimum $100 position
+    
+  # Risk management
+  risk_management:
+    stop_loss_percentage: 0.03      # 3% stop loss
+    take_profit_percentage: 0.06    # 6% take profit
+    max_positions: 5                # Maximum concurrent positions
+    daily_loss_limit: 0.05          # 5% daily loss limit
+    
+  # Trading costs
+  costs:
+    commission_per_trade: 0.00      # $0 commission (modern brokers)
+    spread_cost_percentage: 0.001   # 0.1% spread cost
+    slippage_percentage: 0.001      # 0.1% slippage
 
-# Analysis Configuration
+# Machine Learning Configuration
+machine_learning:
+  # Primary algorithm (based on our Apple/Tesla analysis)
+  primary_algorithm: "LightGBM"
+  
+  # Model configurations
+  models:
+    LightGBM:
+      # Optimized configuration from backtesting results
+      default:
+        n_estimators: 100
+        max_depth: 4
+        learning_rate: 0.08
+        num_leaves: 15
+        subsample: 0.8
+        colsample_bytree: 0.8
+        reg_alpha: 0.1
+        reg_lambda: 0.5
+        min_child_samples: 20
+        random_state: 42
+        verbose: -1
+        
+      # Conservative configuration for stable stocks  
+      conservative:
+        n_estimators: 50
+        max_depth: 3
+        learning_rate: 0.03
+        num_leaves: 10
+        subsample: 0.7
+        colsample_bytree: 0.7
+        reg_alpha: 0.5
+        reg_lambda: 2.0
+        min_child_samples: 100
+        random_state: 42
+        verbose: -1
+        
+      # Aggressive configuration for volatile stocks
+      aggressive:
+        n_estimators: 150
+        max_depth: 5
+        learning_rate: 0.12
+        num_leaves: 25
+        subsample: 0.9
+        colsample_bytree: 0.9
+        reg_alpha: 0.05
+        reg_lambda: 0.3
+        min_child_samples: 10
+        random_state: 42
+        verbose: -1
+  
+  # Training configuration
+  training:
+    # Data requirements
+    min_training_samples: 200
+    min_positive_samples: 50
+    test_size: 0.3
+    validation_method: "time_series_split"
+    cv_folds: 5
+    
+    # Feature engineering
+    feature_engineering:
+      # Technical indicators
+      indicators:
+        # Moving averages
+        sma_periods: [5, 10, 20, 50]
+        ema_periods: [12, 26]
+        
+        # Momentum indicators
+        rsi_periods: [14, 21]
+        momentum_periods: [3, 5, 10, 20]
+        
+        # Volatility indicators
+        volatility_periods: [5, 10, 20]
+        bollinger_period: 20
+        bollinger_std: 2
+        
+        # Volume indicators
+        volume_sma_periods: [10, 20]
+        
+        # MACD
+        macd_fast: 12
+        macd_slow: 26
+        macd_signal: 9
+      
+      # Advanced features (based on Apple analysis)
+      advanced_features:
+        price_position: true          # high/low relative positioning
+        gap_analysis: true           # opening gaps
+        intraday_strength: true      # intraday momentum
+        volatility_breakouts: true   # volatility expansion/contraction
+        volume_surges: true          # unusual volume activity
+        trend_strength: true         # trend acceleration/deceleration
+        seasonal_effects: true       # monthly/quarterly patterns
+        
+    # Target definition (multi-horizon approach from backtesting)
+    target_definition:
+      method: "multi_horizon"
+      horizons:
+        - days: 1
+          threshold: 0.008  # 0.8% in 1 day
+        - days: 3
+          threshold: 0.015  # 1.5% in 3 days
+        - days: 5
+          threshold: 0.025  # 2.5% in 5 days
+      combination_method: "any"  # any profitable horizon triggers positive target
+  
+  # Model retraining (validated from Apple backtesting)
+  retraining:
+    # Retraining frequency
+    frequency_days: 14  # 2-week cycles (proven effective)
+    
+    # Asset-specific frequencies
+    asset_specific:
+      high_volatility: 10    # Weekly for volatile assets
+      medium_volatility: 14  # Bi-weekly for medium volatility
+      low_volatility: 21     # Tri-weekly for stable assets
+    
+    # Retraining triggers
+    triggers:
+      accuracy_threshold: 0.45    # Retrain if accuracy drops below 45%
+      confidence_threshold: 0.50  # Retrain if avg confidence drops below 50%
+      days_since_last: 14         # Maximum days without retraining
+      
+    # Training window strategy
+    window_strategy: "expanding"  # expanding, sliding
+    max_training_days: 500        # Maximum days to include in training
+  
+  # Prediction configuration
+  prediction:
+    confidence_threshold: 0.52    # Minimum confidence for trading signal
+    ensemble_voting: false        # Use multiple models
+    prediction_horizon: 5         # Days to predict forward
+
+# Data Management
+data:
+  # Data sources
+  sources:
+    primary: "yfinance"
+    backup: "alpha_vantage"  # Fallback data source
+    
+  # Data collection
+  collection:
+    # Historical data requirements
+    min_history_days: 400
+    max_history_days: 1000
+    
+    # Update frequency
+    update_frequency: "daily"
+    market_hours_only: true
+    
+    # Data quality
+    quality_checks:
+      min_volume: 100000      # Minimum daily volume
+      max_gap_percentage: 0.20 # Maximum price gap (20%)
+      outlier_detection: true
+      
+  # Data storage
+  storage:
+    cache_enabled: true
+    cache_directory: "data/cache"
+    cache_expiry_hours: 6
+    
+    # Persistence
+    database:
+      type: "sqlite"  # sqlite, postgresql, mysql
+      path: "data/trading_data.db"
+      
+# Backtesting Configuration (based on our Apple framework)
+backtesting:
+  # Default backtesting parameters
+  default_period_days: 365
+  initial_capital: 100000
+  
+  # Backtesting strategies
+  strategies:
+    # Static strategy (no retraining)
+    static:
+      training_ratio: 0.6  # 60% for training
+      testing_ratio: 0.4   # 40% for testing
+      
+    # Adaptive strategy (with retraining)  
+    adaptive:
+      initial_training_ratio: 0.5  # 50% initial training
+      retraining_frequency: 14     # Days between retraining
+      expanding_window: true       # Use expanding training window
+      
+  # Performance metrics
+  metrics:
+    calculate_returns: true
+    calculate_sharpe: true
+    calculate_max_drawdown: true
+    calculate_win_rate: true
+    calculate_trade_frequency: true
+    
+  # Risk modeling
+  risk_modeling:
+    var_confidence: 0.05      # 95% VaR
+    expected_shortfall: true
+    maximum_drawdown_limit: 0.20  # 20% max drawdown
+
+# Portfolio Management
+portfolio:
+  # Portfolio construction
+  construction:
+    max_assets: 5
+    rebalancing_frequency: "weekly"
+    correlation_threshold: 0.7  # Maximum correlation between assets
+    
+  # Capital allocation
+  allocation:
+    cash_reserve: 0.10      # Keep 10% in cash
+    single_asset_limit: 0.20  # Maximum 20% per asset
+    sector_limit: 0.50      # Maximum 50% per sector
+  
+  # Starting portfolio value for simulations
+  starting_value: 100000
+  
+  # Position sizing
+  max_position_size: 1000  # Maximum shares per position
+
+# Risk Management System
+risk_management:
+  # Position-level risks
+  position_risks:
+    max_position_size: 0.20     # 20% of portfolio
+    stop_loss_percentage: 0.03  # 3% stop loss
+    take_profit_percentage: 0.06 # 6% take profit
+    max_holding_days: 30        # Maximum holding period
+    
+  # Portfolio-level risks
+  portfolio_risks:
+    max_daily_loss: 0.05        # 5% daily loss limit
+    max_weekly_loss: 0.10       # 10% weekly loss limit
+    max_drawdown: 0.20          # 20% maximum drawdown
+    volatility_limit: 0.25      # 25% annual volatility limit
+    
+  # Market condition checks
+  market_conditions:
+    market_crash_protection: true
+    volatility_spike_protection: true
+    low_liquidity_protection: true
+    
+# Monitoring and Alerting
+monitoring:
+  # Performance monitoring
+  performance:
+    daily_pnl_alerts: true
+    weekly_performance_reports: true
+    monthly_risk_reports: true
+    
+  # Model monitoring
+  model_monitoring:
+    accuracy_degradation_alerts: true
+    prediction_confidence_alerts: true
+    feature_drift_detection: true
+    
+  # Alert thresholds
+  alerts:
+    daily_loss_threshold: 0.03      # 3% daily loss
+    accuracy_drop_threshold: 0.10   # 10% accuracy drop
+    confidence_drop_threshold: 0.15 # 15% confidence drop
+    
+  # Notification methods
+  notifications:
+    email_enabled: false
+    slack_enabled: false
+    console_logging: true
+
+# Analysis and Reporting
 analysis:
-  # Performance metrics to calculate
-  calculate_sharpe: true
-  calculate_returns: true
-  calculate_volatility: true
-  calculate_max_drawdown: true
-  
-  # Plotting configuration
-  generate_plots: true
-  plot_strategy_performance: true
-  save_plots: true
-  plot_directory: "plots"
-  
-  # Reporting
-  generate_reports: true
-  report_directory: "reports"
-  
-  # Logging
-  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
-  log_file: "trading.log"
-
-# Experimental Features
-experimental:
-  # Advanced retraining strategies
-  adaptive_retraining: true
-  volatility_based_retraining: true
-  
-  # Enhanced features 
-  multi_timeframe_analysis: false
-  sector_analysis: false
-  correlation_analysis: false
-  
-  # Feature engineering
-  additional_indicators: false
-  custom_features: false
+  # Analysis types
+  analysis_types:
+    performance_analysis: true
+    risk_analysis: true
+    attribution_analysis: true
+    backtesting_analysis: true
+    
+  # Visualization
+  visualization:
+    generate_plots: true
+    plot_directory: "reports/plots"
+    plot_formats: ["png", "html"]
+    
+  # Reports
+  reporting:
+    generate_reports: true
+    report_directory: "reports"
+    report_formats: ["html", "pdf"]
+    auto_email_reports: false
 
 # Environment Configuration
 environment:
-  # Data sources
-  data_source: "yfinance"  # Options: yfinance, alpha_vantage, quandl
-  
-  # Cache settings
-  cache_data: true
-  cache_directory: "cache"
-  cache_expiry_hours: 24
-  
+  # Paths
+  paths:
+    models_directory: "models"
+    data_directory: "data"
+    logs_directory: "logs" 
+    reports_directory: "reports"
+    cache_directory: "cache"
+    
+  # Logging
+  logging:
+    level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+    file_logging: true
+    console_logging: true
+    log_rotation: true
+    max_log_size_mb: 100
+    
   # Performance
-  parallel_processing: false
-  max_workers: 4
+  performance:
+    parallel_processing: true
+    max_workers: 4
+    memory_limit_gb: 8
+    
+  # Development settings
+  development:
+    debug_mode: false
+    profiling_enabled: false
+    test_mode: false
+    paper_trading: true
+
+# External Services (for future integration)
+external_services:
+  # Brokerage APIs
+  brokers:
+    robinhood:
+      enabled: false
+      paper_trading: true
+      
+    interactive_brokers:
+      enabled: false
+      paper_trading: true
+      
+  # Data services
+  data_services:
+    alpha_vantage:
+      enabled: false
+      api_key: null
+      
+    quandl:
+      enabled: false
+      api_key: null
+      
+  # News and sentiment
+  news_services:
+    news_api:
+      enabled: false
+      api_key: null
+      
+# Security
+security:
+  # API keys and secrets (use environment variables in production)
+  api_keys:
+    storage_method: "environment"  # environment, file, vault
+    
+  # Data encryption
+  encryption:
+    encrypt_stored_data: false
+    encrypt_model_files: false
+    
+  # Access control
+  access_control:
+    require_authentication: false
+    session_timeout_minutes: 60
