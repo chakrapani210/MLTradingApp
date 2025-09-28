@@ -29,6 +29,25 @@ trading:
     rsi_overbought: 70
     rsi_oversold: 30
     
+    # Bollinger Bands Configuration
+    bollinger_period: 20
+    bollinger_std: 2
+    
+    # MACD Configuration
+    macd_fast: 12
+    macd_slow: 26
+    macd_signal: 9
+    
+    # Golden Cross Pattern Detection
+    golden_cross:
+      enabled: true
+      short_window: 20  # Short-term SMA for golden cross
+      long_window: 50   # Long-term SMA for golden cross
+      confirmation_days: 3  # Days to confirm crossover
+      strength_threshold: 0.6  # Minimum strength score (0-1)
+      volume_confirmation: false  # Require volume confirmation
+      trend_consistency_days: 10  # Days to check trend consistency
+    
     # Other Technical Indicators
     bollinger_period: 20
     bollinger_std: 2

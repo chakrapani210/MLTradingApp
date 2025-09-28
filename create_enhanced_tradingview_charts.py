@@ -167,6 +167,63 @@ def create_interactive_chart(stock_data, symbol, sma_short, sma_long, trade_deta
             row=1, col=1
         )
     
+    # Add golden cross detection if both SMAs are available
+    if f'SMA_{sma_short}' in stock_data.columns and f'SMA_{sma_long}' in stock_data.columns:
+        # Detect golden and death crosses
+        sma_short_data = stock_data[f'SMA_{sma_short}']
+        sma_long_data = stock_data[f'SMA_{sma_long}']
+        
+        # Find crossover points
+        short_above_long = sma_short_data > sma_long_data
+        crossovers = short_above_long != short_above_long.shift(1)
+        
+        golden_crosses = crossovers & short_above_long
+        death_crosses = crossovers & ~short_above_long
+        
+        # Add golden cross markers
+        if golden_crosses.any():
+            golden_dates = stock_data.index[golden_crosses]
+            golden_prices = close_price[golden_crosses]
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=golden_dates,
+                    y=golden_prices,
+                    mode='markers',
+                    marker=dict(
+                        symbol='star',
+                        size=20,
+                        color='gold',
+                        line=dict(width=2, color='darkgoldenrod')
+                    ),
+                    name='Golden Cross',
+                    hovertemplate='Golden Cross: SMA%{} crossed above SMA%{}<br>Date: %{x}<br>Price: $%{y:.2f}<extra></extra>'.replace('%{}', str(sma_short)).replace('%{}', str(sma_long), 1)
+                ),
+                row=1, col=1
+            )
+        
+        # Add death cross markers  
+        if death_crosses.any():
+            death_dates = stock_data.index[death_crosses]
+            death_prices = close_price[death_crosses]
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=death_dates,
+                    y=death_prices,
+                    mode='markers',
+                    marker=dict(
+                        symbol='x',
+                        size=18,
+                        color='darkred',
+                        line=dict(width=2, color='red')
+                    ),
+                    name='Death Cross',
+                    hovertemplate='Death Cross: SMA%{} crossed below SMA%{}<br>Date: %{x}<br>Price: $%{y:.2f}<extra></extra>'.replace('%{}', str(sma_short)).replace('%{}', str(sma_long), 1)
+                ),
+                row=1, col=1
+            )
+    
     # Add trade markers with enhanced information
     if trade_details:
         buy_trades = [t for t in trade_details if t['action'] == 'BUY']

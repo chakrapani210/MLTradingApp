@@ -15,6 +15,7 @@ from sklearn.metrics import classification_report, accuracy_score
 from config_manager import get_config
 from market_indicators import get_enhanced_features, get_market_data, analyze_market_correlation
 from model_management import ModelManager, ModelPredictionService
+from indicators import detect_golden_cross, generate_golden_cross_signals
 
 # Suppress pandas warnings for cleaner output
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -300,9 +301,21 @@ class EnhancedTradingStrategy:
         # Initialize auto order size manager
         self.order_size_manager = AutoOrderSizeManager(self.config)
         
+        # Initialize golden cross configuration
+        trading_config = self.config.config.get('trading', {})
+        self.golden_cross_config = trading_config.get('indicators', {}).get('golden_cross', {})
+        self.golden_cross_enabled = self.golden_cross_config.get('enabled', True)
+        self.gc_short_window = self.golden_cross_config.get('short_window', 20)
+        self.gc_long_window = self.golden_cross_config.get('long_window', 50)
+        self.gc_confirmation_days = self.golden_cross_config.get('confirmation_days', 3)
+        self.gc_strength_threshold = self.golden_cross_config.get('strength_threshold', 0.6)
+        
         print("[INIT] Enhanced Trading Strategy with Model Management initialized")
         print(f"       Models directory: {self.model_manager.models_dir}")
         print(f"       Order sizing strategy: {self.config.get_order_sizing_strategy()}")
+        print(f"       Golden Cross: {'Enabled' if self.golden_cross_enabled else 'Disabled'}")
+        if self.golden_cross_enabled:
+            print(f"       GC Windows: {self.gc_short_window}/{self.gc_long_window}")
         print(f"       Models directory: {self.model_manager.models_dir}")
         
     def check_existing_model(self, symbol: str) -> bool:
@@ -330,6 +343,145 @@ class EnhancedTradingStrategy:
             'market_indicators': market_indicators,
             'analysis_period': f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
         }
+    
+    def analyze_golden_cross_patterns(self, symbol: str, start_date: dt.datetime, 
+                                    end_date: dt.datetime) -> Dict:
+        """Analyze golden cross patterns for the symbol"""
+        if not self.golden_cross_enabled:
+            return {'enabled': False, 'message': 'Golden cross analysis disabled'}
+        
+        print(f"[GOLDEN_CROSS] Analyzing Golden Cross Patterns for {symbol}")
+        print(f"               Windows: {self.gc_short_window}/{self.gc_long_window}")
+        
+        # Get price data
+        try:
+            stock_data = get_market_data([symbol], start_date, end_date)[symbol]
+            
+            # Detect golden cross patterns
+            gc_analysis = detect_golden_cross(
+                stock_data, 
+                sma_short_window=self.gc_short_window,
+                sma_long_window=self.gc_long_window,
+                lookback_days=self.gc_confirmation_days
+            )
+            
+            # Generate trading signals
+            gc_signals = generate_golden_cross_signals(
+                stock_data,
+                sma_short_window=self.gc_short_window,
+                sma_long_window=self.gc_long_window
+            )
+            
+            # Count patterns
+            golden_crosses = (gc_analysis['golden_cross_signals'] > 0).sum()
+            death_crosses = (gc_analysis['golden_cross_signals'] < 0).sum()
+            
+            # Get current status
+            current_status = gc_analysis['current_status']
+            latest_golden = gc_analysis['latest_golden_cross']
+            latest_death = gc_analysis['latest_death_cross']
+            
+            # Calculate average pattern strength
+            avg_strength = gc_analysis['pattern_strength'].mean()
+            strong_patterns = (gc_analysis['pattern_strength'] >= self.gc_strength_threshold).sum()
+            
+            print(f"               Golden Crosses: {golden_crosses}")
+            print(f"               Death Crosses: {death_crosses}")
+            print(f"               Current Status: {current_status}")
+            print(f"               Avg Strength: {avg_strength:.3f}")
+            print(f"               Strong Patterns: {strong_patterns}")
+            
+            return {
+                'enabled': True,
+                'analysis': gc_analysis,
+                'signals': gc_signals,
+                'summary': {
+                    'golden_crosses': golden_crosses,
+                    'death_crosses': death_crosses,
+                    'current_status': current_status,
+                    'latest_golden_cross': latest_golden,
+                    'latest_death_cross': latest_death,
+                    'average_strength': avg_strength,
+                    'strong_patterns': strong_patterns,
+                    'strength_threshold': self.gc_strength_threshold
+                },
+                'config': {
+                    'short_window': self.gc_short_window,
+                    'long_window': self.gc_long_window,
+                    'confirmation_days': self.gc_confirmation_days
+                }
+            }
+            
+        except Exception as e:
+            print(f"               [ERROR] Golden cross analysis failed: {e}")
+            return {'enabled': True, 'error': str(e)}
+    
+    def get_golden_cross_signal(self, symbol: str, current_date: dt.datetime = None) -> Dict:
+        """Get current golden cross signal for trading decision"""
+        if not self.golden_cross_enabled:
+            return {'signal': 'NONE', 'confidence': 0.0, 'reason': 'Golden cross disabled'}
+        
+        try:
+            # Use current date if not provided
+            if current_date is None:
+                current_date = dt.datetime.now()
+            
+            # Look back enough days to detect patterns
+            lookback_days = max(self.gc_long_window * 2, 100)
+            start_date = current_date - dt.timedelta(days=lookback_days)
+            
+            # Get recent price data
+            stock_data = get_market_data([symbol], start_date, current_date)[symbol]
+            
+            if len(stock_data) < self.gc_long_window:
+                return {'signal': 'NONE', 'confidence': 0.0, 'reason': 'Insufficient data'}
+            
+            # Generate golden cross signals
+            gc_signals = generate_golden_cross_signals(
+                stock_data,
+                sma_short_window=self.gc_short_window,
+                sma_long_window=self.gc_long_window
+            )
+            
+            # Get the latest signal
+            latest_signals = gc_signals.iloc[-self.gc_confirmation_days:]
+            
+            # Check for recent golden cross
+            recent_golden = latest_signals['buy_signal'].sum() > 0
+            recent_death = latest_signals['sell_signal'].sum() > 0
+            
+            # Get latest confidence scores
+            latest_buy_confidence = latest_signals['buy_confidence'].max()
+            latest_sell_confidence = latest_signals['sell_confidence'].max()
+            
+            # Determine signal
+            if recent_golden and latest_buy_confidence >= self.gc_strength_threshold:
+                return {
+                    'signal': 'BUY',
+                    'confidence': latest_buy_confidence,
+                    'reason': f'Golden cross detected (SMA{self.gc_short_window} > SMA{self.gc_long_window})',
+                    'pattern_strength': latest_buy_confidence,
+                    'confirmation_days': self.gc_confirmation_days
+                }
+            elif recent_death and latest_sell_confidence >= self.gc_strength_threshold:
+                return {
+                    'signal': 'SELL',
+                    'confidence': latest_sell_confidence,
+                    'reason': f'Death cross detected (SMA{self.gc_short_window} < SMA{self.gc_long_window})',
+                    'pattern_strength': latest_sell_confidence,
+                    'confirmation_days': self.gc_confirmation_days
+                }
+            else:
+                return {
+                    'signal': 'NONE',
+                    'confidence': 0.0,
+                    'reason': f'No strong cross pattern (threshold: {self.gc_strength_threshold})',
+                    'latest_buy_confidence': latest_buy_confidence,
+                    'latest_sell_confidence': latest_sell_confidence
+                }
+                
+        except Exception as e:
+            return {'signal': 'ERROR', 'confidence': 0.0, 'reason': f'Golden cross error: {e}'}
     
     def prepare_training_data(self, symbol: str, train_start: dt.datetime, 
                             train_end: dt.datetime) -> Tuple[np.ndarray, np.ndarray]:
@@ -687,15 +839,19 @@ class EnhancedTradingStrategy:
             market_context = self.analyze_market_context(symbol, train_start, current_date)
         
         print()
-        # 4. Generate Predictions (uses prediction service if available)
+        # 4. Golden Cross Pattern Analysis
+        golden_cross_analysis = self.analyze_golden_cross_patterns(symbol, train_start, current_date)
+        
+        print()
+        # 5. Generate Predictions (uses prediction service if available)
         predictions, signal_analysis = self.generate_predictions(symbol, test_start, current_date)
         
         print()
-        # 5. Backtest Strategy
+        # 6. Backtest Strategy
         performance = self.backtest_strategy(symbol, test_start, current_date, predictions)
         
         print()
-        # 6. Feature Importance Analysis
+        # 7. Feature Importance Analysis
         feature_analysis = self.analyze_feature_importance()
         
         # Compile complete results
@@ -713,6 +869,7 @@ class EnhancedTradingStrategy:
                 'test_end': current_date
             },
             'market_context': market_context,
+            'golden_cross_analysis': golden_cross_analysis,
             'signal_analysis': signal_analysis,
             'performance': performance,
             'feature_analysis': feature_analysis,
@@ -849,6 +1006,15 @@ class EnhancedTradingStrategy:
         # Get SMA values from config
         sma_short, sma_long = self.order_size_manager.get_sma_config()
         
+        # Get golden cross signal if enabled
+        golden_cross_info = None
+        if self.golden_cross_enabled:
+            try:
+                current_date = historical_data.index[current_idx] if current_idx < len(historical_data) else dt.datetime.now()
+                golden_cross_info = self.get_golden_cross_signal(self.symbol, current_date)
+            except:
+                pass  # Continue without golden cross info if there's an error
+        
         # Calculate technical indicators for reasoning
         if len(historical_data) >= sma_long:
             sma_short_val = historical_data.iloc[:, 0].rolling(window=sma_short).mean().iloc[-1]
@@ -856,7 +1022,11 @@ class EnhancedTradingStrategy:
             
             if signal == 1:  # BUY signal
                 reasons.append(f"ML model predicts upward trend")
-                if sma_short_val > sma_long_val:
+                
+                # Add golden cross reasoning
+                if golden_cross_info and golden_cross_info['signal'] == 'BUY':
+                    reasons.append(f"Golden Cross confirmation: {golden_cross_info['reason']} (confidence: {golden_cross_info['confidence']:.2f})")
+                elif sma_short_val > sma_long_val:
                     reasons.append(f"Golden Cross: SMA{sma_short} ({sma_short_val:.2f}) > SMA{sma_long} ({sma_long_val:.2f})")
                 else:
                     reasons.append(f"SMA{sma_short} ({sma_short_val:.2f}) approaching SMA{sma_long} ({sma_long_val:.2f})")
@@ -866,13 +1036,25 @@ class EnhancedTradingStrategy:
                 
             elif signal == -1:  # SELL signal
                 reasons.append(f"ML model predicts downward trend")
-                if sma_short_val < sma_long_val:
+                
+                # Add golden cross reasoning
+                if golden_cross_info and golden_cross_info['signal'] == 'SELL':
+                    reasons.append(f"Death Cross confirmation: {golden_cross_info['reason']} (confidence: {golden_cross_info['confidence']:.2f})")
+                elif sma_short_val < sma_long_val:
                     reasons.append(f"Death Cross: SMA{sma_short} ({sma_short_val:.2f}) < SMA{sma_long} ({sma_long_val:.2f})")
                 else:
                     reasons.append(f"SMA{sma_short} ({sma_short_val:.2f}) declining from SMA{sma_long} ({sma_long_val:.2f})")
                 
                 if current_shares > 0:
                     reasons.append(f"Closing position of {current_shares} shares")
+        
+        # Add golden cross pattern strength if available
+        if golden_cross_info and 'pattern_strength' in golden_cross_info:
+            strength = golden_cross_info['pattern_strength']
+            if strength >= self.gc_strength_threshold:
+                reasons.append(f"Strong pattern (strength: {strength:.2f})")
+            else:
+                reasons.append(f"Weak pattern (strength: {strength:.2f})")
         
         # Add price context
         if len(historical_data) >= 5:
@@ -973,6 +1155,19 @@ class EnhancedTradingStrategy:
         print(f"\n[MARKET] CONTEXT")
         print(f"   Beta vs SPY: {mc['beta_spy']:.2f}")
         print(f"   Beta vs QQQ: {mc['beta_qqq']:.2f}")
+        
+        # Golden Cross Analysis
+        gc = results.get('golden_cross_analysis', {})
+        if gc.get('enabled', False) and 'summary' in gc:
+            gcs = gc['summary']
+            print(f"\n[GOLDEN_CROSS] ANALYSIS")
+            print(f"   Golden crosses: {gcs['golden_crosses']}")
+            print(f"   Death crosses: {gcs['death_crosses']}")
+            print(f"   Current status: {gcs['current_status']}")
+            print(f"   Avg pattern strength: {gcs['average_strength']:.3f}")
+            print(f"   Strong patterns: {gcs['strong_patterns']} (threshold: {gcs['strength_threshold']})")
+            if gcs['latest_golden_cross']:
+                print(f"   Latest golden cross: {gcs['latest_golden_cross'].strftime('%Y-%m-%d') if hasattr(gcs['latest_golden_cross'], 'strftime') else gcs['latest_golden_cross']}")
         
         # Feature Analysis
         fa = results['feature_analysis']
