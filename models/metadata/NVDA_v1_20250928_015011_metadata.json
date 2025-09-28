@@ -1,0 +1,264 @@
+{
+  "symbol": "NVDA",
+  "version": 1,
+  "timestamp": "20250928_015011",
+  "model_path": "models\\trained_models\\NVDA\\NVDA_v1_20250928_015011.pkl",
+  "model_type": "DecisionTreeClassifier",
+  "training_info": {
+    "train_start": "2024-04-01T00:00:00",
+    "train_end": "2025-04-01T00:00:00",
+    "training_samples": 248,
+    "feature_count": 17
+  },
+  "performance": {
+    "training_accuracy": 0.7419354838709677,
+    "algorithm": "DecisionTree",
+    "training_samples": 248,
+    "feature_count": 17
+  },
+  "features": {
+    "names": [
+      "price_SMA",
+      "BB_val",
+      "Momentum",
+      "Volatility",
+      "MACD",
+      "SPY_trend",
+      "QQQ_trend",
+      "SPY_momentum",
+      "QQQ_momentum",
+      "stock_vs_SPY_strength",
+      "stock_vs_QQQ_strength",
+      "QQQ_vs_SPY_strength",
+      "beta_SPY",
+      "beta_QQQ",
+      "market_volatility_regime",
+      "tech_outperformance",
+      "market_breadth"
+    ],
+    "count": 17,
+    "enhanced_features": true
+  },
+  "config_snapshot": {
+    "trading": {
+      "symbols": [
+        "TSLA",
+        "AAPL",
+        "NVDA",
+        "MSFT",
+        "GOOGL"
+      ],
+      "default_symbol": "TSLA",
+      "shares_per_trade": 20,
+      "market_impact": 0.005,
+      "indicators": {
+        "sma_short": 20,
+        "sma_long": 50,
+        "rsi_period": 14,
+        "rsi_overbought": 70,
+        "rsi_oversold": 30,
+        "bollinger_period": 20,
+        "bollinger_std": 2,
+        "macd_fast": 12,
+        "macd_slow": 26,
+        "macd_signal": 9,
+        "golden_cross": {
+          "enabled": true,
+          "short_window": 20,
+          "long_window": 50,
+          "confirmation_days": 3,
+          "strength_threshold": 0.6,
+          "volume_confirmation": false,
+          "trend_consistency_days": 10
+        }
+      },
+      "order_sizing": {
+        "strategy": "volatility_adjusted",
+        "fixed": {
+          "shares": 20
+        },
+        "percentage": {
+          "portfolio_pct": 0.05,
+          "min_shares": 1,
+          "max_shares": 100
+        },
+        "volatility_adjusted": {
+          "base_shares": 20,
+          "volatility_window": 20,
+          "volatility_target": 0.02,
+          "min_shares": 5,
+          "max_shares": 200,
+          "adjustment_factor": 1.5
+        },
+        "kelly_criterion": {
+          "base_portfolio_pct": 0.1,
+          "win_rate": 0.55,
+          "avg_win": 0.08,
+          "avg_loss": 0.06,
+          "min_shares": 1,
+          "max_shares": 150,
+          "kelly_fraction": 0.25
+        },
+        "risk_parity": {
+          "portfolio_risk_budget": 0.15,
+          "lookback_days": 30,
+          "min_shares": 1,
+          "max_shares": 100
+        },
+        "market_conditions": {
+          "enabled": true,
+          "bull_market_multiplier": 1.2,
+          "bear_market_multiplier": 0.7,
+          "high_vix_threshold": 25,
+          "low_vix_threshold": 15,
+          "vix_adjustment_factor": 0.1
+        },
+        "limits": {
+          "max_position_pct": 0.2,
+          "max_daily_trades": 10,
+          "max_portfolio_heat": 0.5
+        }
+      },
+      "position_file_extension": ".txt"
+    },
+    "model_management": {
+      "models_base_path": "models",
+      "max_versions_per_symbol": 5,
+      "auto_cleanup": true,
+      "auto_save_models": true,
+      "use_model_cache": true,
+      "validation_split": 0.2,
+      "min_training_accuracy": 0.6,
+      "prediction_service": {
+        "enabled": true,
+        "confidence_threshold": 0.7,
+        "cache_predictions": true
+      },
+      "retraining": {
+        "performance_threshold": 0.05,
+        "days_since_training": 30,
+        "market_regime_change": true
+      }
+    },
+    "data": {
+      "training_period_months": 12,
+      "simulation": {
+        "start_date": "2025-07-01",
+        "end_date": "2025-12-31"
+      },
+      "live_trading": {
+        "lookback_days": 30
+      },
+      "analysis": {
+        "tesla_analysis": {
+          "train_start": "2020-01-01",
+          "train_end": "2025-07-01",
+          "test_start": "2025-07-01",
+          "test_end": "2025-12-31"
+        },
+        "tqqq_analysis": {
+          "train_start": "2015-01-01",
+          "train_end": "2019-01-01",
+          "test_start": "2019-05-05",
+          "test_end": "2020-01-01"
+        },
+        "sqqq_analysis": {
+          "train_start": "2020-01-01",
+          "train_end": "2025-07-01",
+          "test_start": "2025-07-01",
+          "test_end": "2025-12-31"
+        }
+      }
+    },
+    "indicators": {
+      "window": 5,
+      "use_sma": true,
+      "use_bollinger_bands": true,
+      "use_momentum": true,
+      "use_volatility": true,
+      "use_macd": true,
+      "use_market_context": true,
+      "market_indices": [
+        "SPY",
+        "QQQ"
+      ],
+      "use_spy_trend": true,
+      "use_qqq_trend": true,
+      "use_relative_strength": true,
+      "use_beta_features": true,
+      "use_market_volatility_regime": true,
+      "use_sector_rotation": true,
+      "use_market_breadth": true,
+      "drop_upper_bb": true,
+      "drop_lower_bb": true,
+      "keep_bb_value": true
+    },
+    "ml_model": {
+      "algorithm": "DecisionTree",
+      "max_depth": 5,
+      "random_state": 42,
+      "n_estimators": 100,
+      "min_training_samples": 100,
+      "min_labels_required": 20,
+      "use_enhanced_features": true,
+      "feature_selection": "auto",
+      "retraining": {
+        "default_frequency": 10,
+        "high_volatility_frequency": 5,
+        "medium_volatility_frequency": 10,
+        "low_volatility_frequency": 22,
+        "high_volatility_threshold": 0.8,
+        "medium_volatility_threshold": 0.4,
+        "accuracy_threshold": 0.3
+      }
+    },
+    "portfolio": {
+      "starting_value": 3000,
+      "commission": 0.0,
+      "impact": 0.005,
+      "max_position_size": 20
+    },
+    "robinhood": {
+      "username": "username@gmail.com",
+      "password": "P@ssw0rd",
+      "qr_code": "123456789qwertyu",
+      "order_type": "market",
+      "time_in_force": "GFD",
+      "enable_live_trading": false,
+      "paper_trading": true
+    },
+    "analysis": {
+      "calculate_sharpe": true,
+      "calculate_returns": true,
+      "calculate_volatility": true,
+      "calculate_max_drawdown": true,
+      "generate_plots": true,
+      "plot_strategy_performance": true,
+      "save_plots": true,
+      "plot_directory": "plots",
+      "generate_reports": true,
+      "report_directory": "reports",
+      "log_level": "INFO",
+      "log_file": "trading.log"
+    },
+    "experimental": {
+      "adaptive_retraining": true,
+      "volatility_based_retraining": true,
+      "multi_timeframe_analysis": false,
+      "sector_analysis": false,
+      "correlation_analysis": false,
+      "additional_indicators": false,
+      "custom_features": false
+    },
+    "environment": {
+      "data_source": "yfinance",
+      "cache_data": true,
+      "cache_directory": "cache",
+      "cache_expiry_hours": 24,
+      "parallel_processing": false,
+      "max_workers": 4
+    }
+  },
+  "created_at": "2025-09-28T01:50:11.431560",
+  "model_size_bytes": 5431
+}

@@ -15,7 +15,7 @@ from sklearn.metrics import classification_report, accuracy_score
 from config_manager import get_config
 from market_indicators import get_enhanced_features, get_market_data, analyze_market_correlation
 from model_management import ModelManager, ModelPredictionService
-from indicators import detect_golden_cross, generate_golden_cross_signals
+from indicators import detect_golden_cross, generate_golden_cross_signals, detect_short_term_patterns, generate_combined_short_term_signals
 
 # Suppress pandas warnings for cleaner output
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -307,6 +307,11 @@ class EnhancedTradingStrategy:
         self.golden_cross_enabled = self.golden_cross_config.get('enabled', True)
         self.gc_short_window = self.golden_cross_config.get('short_window', 20)
         self.gc_long_window = self.golden_cross_config.get('long_window', 50)
+        
+        # Initialize short-term patterns configuration
+        self.short_term_config = trading_config.get('indicators', {}).get('short_term_patterns', {})
+        self.short_term_enabled = self.short_term_config.get('enabled', True)
+        self.short_term_weight = self.short_term_config.get('weight', 0.3)  # Weight in final decision
         self.gc_confirmation_days = self.golden_cross_config.get('confirmation_days', 3)
         self.gc_strength_threshold = self.golden_cross_config.get('strength_threshold', 0.6)
         
@@ -482,6 +487,96 @@ class EnhancedTradingStrategy:
                 
         except Exception as e:
             return {'signal': 'ERROR', 'confidence': 0.0, 'reason': f'Golden cross error: {e}'}
+    
+    def get_short_term_pattern_signals(self, symbol: str, current_date: dt.datetime = None) -> Dict:
+        """Get current short-term pattern signals for trading decision"""
+        if not self.short_term_enabled:
+            return {'signal': 'NONE', 'confidence': 0.0, 'reason': 'Short-term patterns disabled'}
+        
+        try:
+            # Use current date if not provided
+            if current_date is None:
+                current_date = dt.datetime.now()
+            
+            # Look back enough days for pattern analysis
+            lookback_days = 60
+            start_date = current_date - dt.timedelta(days=lookback_days)
+            
+            # Get recent OHLCV data
+            market_data = get_market_data([symbol], start_date, current_date)
+            stock_data = market_data[symbol]
+            
+            if len(stock_data) < 30:  # Need at least 30 days for short-term analysis
+                return {'signal': 'NONE', 'confidence': 0.0, 'reason': 'Insufficient data for short-term analysis'}
+            
+            # Detect short-term patterns
+            short_term_analysis = detect_short_term_patterns(
+                prices=stock_data,
+                high=stock_data,  # Using close as proxy for high/low if not available
+                low=stock_data,
+                volume=None  # Volume analysis optional
+            )
+            
+            # Generate combined signals
+            combined_signals = generate_combined_short_term_signals(short_term_analysis)
+            
+            # Get the latest signal
+            latest_signal = combined_signals.iloc[-1]
+            
+            # Determine signal strength and direction
+            buy_confidence = latest_signal['buy_confidence']
+            sell_confidence = latest_signal['sell_confidence']
+            buy_signal = latest_signal['buy_signal']
+            sell_signal = latest_signal['sell_signal']
+            
+            # Create pattern summary for reasoning
+            pattern_details = []
+            if 'rsi' in short_term_analysis:
+                latest_rsi = short_term_analysis['rsi'].iloc[-1]
+                if pd.notna(latest_rsi):
+                    if latest_rsi > 70:
+                        pattern_details.append(f"RSI overbought ({latest_rsi:.1f})")
+                    elif latest_rsi < 30:
+                        pattern_details.append(f"RSI oversold ({latest_rsi:.1f})")
+                    else:
+                        pattern_details.append(f"RSI neutral ({latest_rsi:.1f})")
+            
+            if 'bb_signals' in short_term_analysis:
+                bb_signal = short_term_analysis['bb_signals'].iloc[-1]
+                if bb_signal > 0:
+                    pattern_details.append("Bollinger Band bounce")
+                elif bb_signal < 0:
+                    pattern_details.append("Bollinger Band rejection")
+            
+            # Return signal based on confidence levels
+            if buy_signal > 0 and buy_confidence > 0.5:
+                return {
+                    'signal': 'BUY',
+                    'confidence': buy_confidence,
+                    'reason': f'Short-term bullish patterns: {", ".join(pattern_details[:3])}',
+                    'pattern_count': int(buy_signal),
+                    'details': pattern_details
+                }
+            elif sell_signal > 0 and sell_confidence > 0.5:
+                return {
+                    'signal': 'SELL', 
+                    'confidence': sell_confidence,
+                    'reason': f'Short-term bearish patterns: {", ".join(pattern_details[:3])}',
+                    'pattern_count': int(sell_signal),
+                    'details': pattern_details
+                }
+            else:
+                return {
+                    'signal': 'NONE',
+                    'confidence': max(buy_confidence, sell_confidence),
+                    'reason': f'Weak short-term signals: {", ".join(pattern_details[:2])}',
+                    'buy_confidence': buy_confidence,
+                    'sell_confidence': sell_confidence,
+                    'details': pattern_details
+                }
+                
+        except Exception as e:
+            return {'signal': 'ERROR', 'confidence': 0.0, 'reason': f'Short-term pattern error: {e}'}
     
     def prepare_training_data(self, symbol: str, train_start: dt.datetime, 
                             train_end: dt.datetime) -> Tuple[np.ndarray, np.ndarray]:
@@ -669,6 +764,111 @@ class EnhancedTradingStrategy:
             'hold_signals': int(np.sum(predictions == 0)),
             'buy_percentage': float(np.sum(predictions == 1) / len(predictions) * 100)
         }
+    
+    def _enhance_signals_with_patterns(self, predictions: np.ndarray, prices: pd.DataFrame, symbol: str) -> np.ndarray:
+        """Enhance ML predictions by combining with golden cross and short-term pattern signals"""
+        enhanced_predictions = predictions.copy()
+        
+        try:
+            # Get date range for pattern analysis
+            start_date = prices.index[0]
+            end_date = prices.index[-1]
+            
+            # Get golden cross analysis if enabled
+            golden_cross_signals = None
+            if self.golden_cross_enabled:
+                try:
+                    stock_data = get_market_data([symbol], start_date, end_date)[symbol]
+                    gc_signals = generate_golden_cross_signals(
+                        stock_data,
+                        sma_short_window=self.gc_short_window,
+                        sma_long_window=self.gc_long_window
+                    )
+                    # Align with prediction timeframe
+                    golden_cross_signals = gc_signals.reindex(prices.index, fill_value=0)
+                except Exception as e:
+                    print(f"[WARNING] Golden cross enhancement failed: {e}")
+            
+            # Get short-term pattern analysis if enabled
+            short_term_signals = None
+            if self.short_term_enabled:
+                try:
+                    stock_data = get_market_data([symbol], start_date, end_date)[symbol]
+                    st_analysis = detect_short_term_patterns(
+                        prices=stock_data,
+                        high=stock_data,
+                        low=stock_data,
+                        volume=None
+                    )
+                    st_combined = generate_combined_short_term_signals(st_analysis)
+                    # Align with prediction timeframe
+                    short_term_signals = st_combined.reindex(prices.index, fill_value=0)
+                except Exception as e:
+                    print(f"[WARNING] Short-term pattern enhancement failed: {e}")
+            
+            # Combine signals with weighted approach
+            enhanced_count = 0
+            for i in range(len(enhanced_predictions)):
+                ml_signal = predictions[i]
+                final_signal = ml_signal
+                
+                # Golden cross confirmation/override
+                if golden_cross_signals is not None and i < len(golden_cross_signals):
+                    gc_buy = golden_cross_signals['buy_signal'].iloc[i] if 'buy_signal' in golden_cross_signals else 0
+                    gc_sell = golden_cross_signals['sell_signal'].iloc[i] if 'sell_signal' in golden_cross_signals else 0
+                    gc_buy_conf = golden_cross_signals['buy_confidence'].iloc[i] if 'buy_confidence' in golden_cross_signals else 0
+                    gc_sell_conf = golden_cross_signals['sell_confidence'].iloc[i] if 'sell_confidence' in golden_cross_signals else 0
+                    
+                    # Strong golden cross can override ML prediction
+                    if gc_buy > 0 and gc_buy_conf >= self.gc_strength_threshold:
+                        if ml_signal <= 0:  # ML says HOLD/SELL but golden cross says BUY
+                            final_signal = 1
+                            enhanced_count += 1
+                    elif gc_sell > 0 and gc_sell_conf >= self.gc_strength_threshold:
+                        if ml_signal >= 0:  # ML says HOLD/BUY but death cross says SELL
+                            final_signal = -1
+                            enhanced_count += 1
+                
+                # Short-term pattern confirmation
+                if short_term_signals is not None and i < len(short_term_signals):
+                    st_buy = short_term_signals['buy_signal'].iloc[i] if 'buy_signal' in short_term_signals else 0
+                    st_sell = short_term_signals['sell_signal'].iloc[i] if 'sell_signal' in short_term_signals else 0
+                    st_buy_conf = short_term_signals['buy_confidence'].iloc[i] if 'buy_confidence' in short_term_signals else 0
+                    st_sell_conf = short_term_signals['sell_confidence'].iloc[i] if 'sell_confidence' in short_term_signals else 0
+                    
+                    # Use short-term patterns as confirmation weight
+                    pattern_weight = self.short_term_weight
+                    
+                    # Strong short-term signals can enhance ML predictions
+                    if ml_signal == 1 and st_buy > 0 and st_buy_conf > 0.6:
+                        # Strong ML BUY + Strong short-term BUY = confirmed BUY
+                        final_signal = 1
+                        enhanced_count += 1
+                    elif ml_signal == -1 and st_sell > 0 and st_sell_conf > 0.6:
+                        # Strong ML SELL + Strong short-term SELL = confirmed SELL
+                        final_signal = -1
+                        enhanced_count += 1
+                    elif ml_signal == 0:  # ML says HOLD
+                        # Let strong short-term patterns make the decision
+                        if st_buy > 0 and st_buy_conf > 0.7:
+                            final_signal = 1
+                            enhanced_count += 1
+                        elif st_sell > 0 and st_sell_conf > 0.7:
+                            final_signal = -1
+                            enhanced_count += 1
+                
+                enhanced_predictions[i] = final_signal
+            
+            if enhanced_count > 0:
+                print(f"[ENHANCEMENT] Enhanced {enhanced_count} signals using pattern analysis")
+                print(f"              Golden Cross: {'Enabled' if golden_cross_signals is not None else 'Disabled'}")
+                print(f"              Short-term Patterns: {'Enabled' if short_term_signals is not None else 'Disabled'}")
+            
+        except Exception as e:
+            print(f"[WARNING] Signal enhancement failed: {e}")
+            print(f"[INFO] Using original ML predictions")
+        
+        return enhanced_predictions
     
     def backtest_strategy(self, symbol: str, test_start: dt.datetime, 
                          test_end: dt.datetime, predictions: np.ndarray) -> Dict:
@@ -906,6 +1106,9 @@ class EnhancedTradingStrategy:
         self.trade_details = []
         self.decision_reasons = []
         
+        # Enhance predictions with pattern signals
+        enhanced_predictions = self._enhance_signals_with_patterns(predictions, prices, symbol)
+        
         # Get portfolio configuration for portfolio value tracking
         portfolio_config = self.config.get_portfolio_config()
         current_portfolio_value = portfolio_config['starting_value']
@@ -916,9 +1119,9 @@ class EnhancedTradingStrategy:
         order_sizes = []
         order_prices = []
         
-        for i in range(len(predictions)):
+        for i in range(len(enhanced_predictions)):
             current_price = float(prices.iloc[i, 0])
-            signal = predictions[i]
+            signal = enhanced_predictions[i]
             current_date = prices.index[i]
             
             if signal != 0:  # BUY or SELL signal
@@ -1015,6 +1218,15 @@ class EnhancedTradingStrategy:
             except:
                 pass  # Continue without golden cross info if there's an error
         
+        # Get short-term pattern signals if enabled
+        short_term_info = None
+        if self.short_term_enabled:
+            try:
+                current_date = historical_data.index[current_idx] if current_idx < len(historical_data) else dt.datetime.now()
+                short_term_info = self.get_short_term_pattern_signals(self.symbol, current_date)
+            except:
+                pass  # Continue without short-term info if there's an error
+        
         # Calculate technical indicators for reasoning
         if len(historical_data) >= sma_long:
             sma_short_val = historical_data.iloc[:, 0].rolling(window=sma_short).mean().iloc[-1]
@@ -1031,6 +1243,12 @@ class EnhancedTradingStrategy:
                 else:
                     reasons.append(f"SMA{sma_short} ({sma_short_val:.2f}) approaching SMA{sma_long} ({sma_long_val:.2f})")
                 
+                # Add short-term pattern reasoning
+                if short_term_info and short_term_info['signal'] == 'BUY':
+                    reasons.append(f"Short-term bullish: {short_term_info['reason']} (confidence: {short_term_info['confidence']:.2f})")
+                elif short_term_info and short_term_info['signal'] == 'NONE' and short_term_info.get('buy_confidence', 0) > 0.3:
+                    reasons.append(f"Weak short-term support: {short_term_info['reason']}")
+                
                 if current_shares == 0:
                     reasons.append("No current position - entering long")
                 
@@ -1044,6 +1262,12 @@ class EnhancedTradingStrategy:
                     reasons.append(f"Death Cross: SMA{sma_short} ({sma_short_val:.2f}) < SMA{sma_long} ({sma_long_val:.2f})")
                 else:
                     reasons.append(f"SMA{sma_short} ({sma_short_val:.2f}) declining from SMA{sma_long} ({sma_long_val:.2f})")
+                
+                # Add short-term pattern reasoning
+                if short_term_info and short_term_info['signal'] == 'SELL':
+                    reasons.append(f"Short-term bearish: {short_term_info['reason']} (confidence: {short_term_info['confidence']:.2f})")
+                elif short_term_info and short_term_info['signal'] == 'NONE' and short_term_info.get('sell_confidence', 0) > 0.3:
+                    reasons.append(f"Weak short-term pressure: {short_term_info['reason']}")
                 
                 if current_shares > 0:
                     reasons.append(f"Closing position of {current_shares} shares")

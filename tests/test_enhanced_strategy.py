@@ -25,6 +25,7 @@ from enhanced_strategy import EnhancedTradingStrategy
 from model_management import ModelManager
 from market_indicators import get_market_data
 from config_manager import get_config
+from create_enhanced_tradingview_charts import create_symbol_chart_with_trades, create_enhanced_tradingview_charts_for_symbols
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -311,47 +312,149 @@ class TestEnhancedStrategy(unittest.TestCase):
         return chart_path
     
     def create_tradingview_style_charts(self):
-        """Create TradingView-style interactive charts with candlesticks, indicators, signals, and orders"""
+        """Create TradingView-style interactive charts using existing enhanced chart generator"""
         print(f"\n{'='*60}")
-        print(f"CREATING TRADINGVIEW-STYLE INTERACTIVE CHARTS")
+        print(f"CREATING ENHANCED TRADINGVIEW CHARTS")
         print(f"{'='*60}")
         
-        # Filter valid results
-        valid_results = {k: v for k, v in self.results.items() if v is not None and k != 'robustness'}
-        
-        if not valid_results:
-            print("[WARNING] No valid results to chart")
+        try:
+            # Get symbols that have been tested
+            valid_symbols = [symbol for symbol, result in self.results.items() 
+                           if result is not None and symbol != 'robustness']
+            
+            if not valid_symbols:
+                print("[WARNING] No valid test results found. Running quick simulation...")
+                # Run a quick simulation on AAPL if no results exist
+                valid_symbols = ['AAPL']
+                self.test_single_symbol_performance()
+            
+            print(f"[CHARTS] Generating enhanced charts for symbols: {valid_symbols}")
+            
+            # Use the existing enhanced chart generator
+            chart_results = create_enhanced_tradingview_charts_for_symbols(valid_symbols)
+            
+            # Extract chart paths
+            chart_files = []
+            for symbol, chart_info in chart_results.items():
+                if 'filename' in chart_info:
+                    chart_files.append(chart_info['filename'])
+                    print(f"    ✅ {symbol}: {chart_info['filename']}")
+                    
+                    # Print performance summary
+                    if 'performance' in chart_info:
+                        perf = chart_info['performance']
+                        if isinstance(perf, dict) and 'performance_summary' in perf:
+                            summary = perf['performance_summary']
+                            print(f"       Performance: {summary.get('strategy_return', 0):.1f}% return")
+                            print(f"       Trades: {chart_info.get('trades', 0)}")
+            
+            # Find dashboard file
+            dashboard_files = [f for f in os.listdir('tests/results') if 'dashboard' in f.lower()]
+            dashboard_path = f"tests/results/{dashboard_files[0]}" if dashboard_files else None
+            
+            if dashboard_path:
+                print(f"[DASHBOARD] Interactive dashboard: {dashboard_path}")
+            
+            print(f"\n🎯 CHART GENERATION COMPLETE!")
+            print(f"   📊 Individual Charts: {len(chart_files)}")
+            print(f"   📈 Dashboard: {'Yes' if dashboard_path else 'No'}")
+            print(f"   📁 Location: tests/results/")
+            print(f"\n💡 TIP: Open the HTML files in your browser to view interactive charts!")
+            
+            return dashboard_path if dashboard_path else chart_files[0] if chart_files else None
+            
+        except Exception as e:
+            print(f"[ERROR] Chart generation failed: {e}")
+            import traceback
+            traceback.print_exc()
             return None
+    
+    def run_simulation_with_charts(self, symbols=['AAPL'], months_back=12):
+        """
+        Simple method to run simulation and immediately generate charts
         
-        # Create charts for each symbol
-        chart_files = []
+        Args:
+            symbols: List of symbols to test (default: ['AAPL'])
+            months_back: Number of months of data to use (default: 12)
         
-        for symbol, result in valid_results.items():
-            if result is None:
-                continue
-                
-            print(f"\n[CHART] Creating TradingView chart for {symbol}...")
+        Returns:
+            dict: Results with chart paths and performance data
+        """
+        print(f"\n🚀 RUNNING ENHANCED SIMULATION WITH AUTOMATIC CHARTS")
+        print(f"{'='*65}")
+        print(f"Symbols: {symbols}")
+        print(f"Period: {months_back} months back")
+        
+        results = {}
+        
+        for symbol in symbols:
+            print(f"\n📈 Processing {symbol}...")
             
             try:
-                # Get market data for the symbol
-                from market_indicators import get_market_data
-                stock_data = get_market_data([symbol], self.train_end, self.end_date)[symbol]
+                # Initialize fresh strategy for each symbol
+                strategy = EnhancedTradingStrategy()
                 
-                # Create the interactive chart
-                chart_path = self._create_tradingview_chart(symbol, stock_data, result)
-                chart_files.append(chart_path)
+                # Run complete simulation
+                simulation_result = strategy.run_complete_simulation(symbol, months_back=months_back)
                 
-                print(f"    [OK] Chart created: {chart_path}")
+                # Store results
+                results[symbol] = {
+                    'simulation': simulation_result,
+                    'strategy': strategy,
+                    'performance_summary': simulation_result.get('performance_summary', {}),
+                    'trade_details': getattr(strategy, 'latest_trade_details', [])
+                }
+                
+                # Print quick summary
+                if 'performance_summary' in simulation_result:
+                    perf = simulation_result['performance_summary']
+                    print(f"   ✅ Strategy Return: {perf.get('strategy_return', 0):.1f}%")
+                    print(f"   ✅ Outperformance: {perf.get('outperformance', 0):.1f}%")
+                    print(f"   ✅ Sharpe Ratio: {perf.get('sharpe_ratio', 0):.3f}")
                 
             except Exception as e:
-                print(f"    [ERROR] Failed to create chart for {symbol}: {e}")
-                continue
+                print(f"   ❌ Error processing {symbol}: {e}")
+                results[symbol] = {'error': str(e)}
         
-        # Create combined dashboard
-        dashboard_path = self._create_trading_dashboard(chart_files)
+        # Generate charts using existing enhanced chart generator
+        print(f"\n📊 GENERATING INTERACTIVE CHARTS...")
+        chart_results = create_enhanced_tradingview_charts_for_symbols(symbols)
         
-        print(f"[DASHBOARD] Trading dashboard created: {dashboard_path}")
-        return dashboard_path
+        # Combine results
+        final_results = {
+            'simulation_results': results,
+            'chart_results': chart_results,
+            'chart_files': []
+        }
+        
+        # Extract chart file paths and display info
+        print(f"\n🎯 RESULTS SUMMARY:")
+        print(f"{'='*50}")
+        
+        for symbol in symbols:
+            if symbol in chart_results and 'filename' in chart_results[symbol]:
+                chart_file = chart_results[symbol]['filename']
+                final_results['chart_files'].append(chart_file)
+                
+                print(f"📈 {symbol}:")
+                print(f"   Chart: {chart_file}")
+                
+                if symbol in results and 'performance_summary' in results[symbol]:
+                    perf = results[symbol]['performance_summary']
+                    print(f"   Return: {perf.get('strategy_return', 0):.1f}%")
+                    print(f"   Trades: {len(results[symbol].get('trade_details', []))}")
+        
+        # Check for dashboard
+        dashboard_files = [f for f in os.listdir('tests/results') if 'dashboard' in f.lower()]
+        if dashboard_files:
+            dashboard_path = f"tests/results/{dashboard_files[0]}"
+            final_results['dashboard'] = dashboard_path
+            print(f"\n📊 Master Dashboard: {dashboard_path}")
+        
+        print(f"\n💡 TIP: Open the HTML files in your browser to view interactive charts!")
+        print(f"📁 Charts saved to: tests/results/")
+        
+        return final_results
     
     def _create_tradingview_chart(self, symbol: str, stock_data: pd.DataFrame, result: Dict) -> str:
         """Create a single TradingView-style chart for a symbol"""
@@ -1067,5 +1170,54 @@ def run_comprehensive_test():
     return result, chart_path, trading_chart_path, report_path
 
 
+def run_simulation_with_charts(symbols=['AAPL'], months_back=12):
+    """
+    EASY-TO-USE FUNCTION: Run enhanced trading simulation and generate charts
+    
+    This function combines simulation + chart generation in one simple call.
+    Perfect for quick testing and visualization.
+    
+    Args:
+        symbols (list): Symbols to test (default: ['AAPL'])
+        months_back (int): Months of historical data (default: 12)
+    
+    Returns:
+        dict: Complete results with charts, performance data, and file paths
+        
+    Example:
+        results = run_simulation_with_charts(['AAPL', 'TSLA'], months_back=6)
+    """
+    print(f"ENHANCED TRADING SIMULATION + CHARTS")
+    print(f"{'='*60}")
+    
+    # Create test instance
+    test_instance = TestEnhancedStrategy()
+    test_instance.setUpClass()
+    test_instance.setUp()
+    
+    # Run simulation with charts
+    results = test_instance.run_simulation_with_charts(symbols, months_back)
+    
+    return results
+
+
 if __name__ == "__main__":
-    run_comprehensive_test()
+    # Option 1: Run comprehensive test suite (original functionality)
+    if len(sys.argv) > 1 and sys.argv[1] == '--comprehensive':
+        run_comprehensive_test()
+    
+    # Option 2: Quick simulation with charts (new default)
+    else:
+        print("Running Quick Simulation with Charts...")
+        print("TIP: Use --comprehensive flag for full test suite")
+        print()
+        
+        # Run quick simulation for popular symbols
+        results = run_simulation_with_charts(['AAPL', 'TSLA'], months_back=6)
+        
+        print(f"\nSIMULATION COMPLETE!")
+        print(f"Chart files generated: {len(results.get('chart_files', []))}")
+        if 'dashboard' in results:
+            print(f"Open dashboard: {results['dashboard']}")
+        else:
+            print(f"Open charts in: tests/results/")
