@@ -163,6 +163,15 @@ cython_debug/
 *.png
 *.log
 
+# Position tracking files
+TSLA.txt
+AAPL.txt
+NVDA.txt
+MSFT.txt
+GOOGL.txt
+TQQQ.txt
+SQQQ.txt
+
 # Credentials and API keys
 credentials.json
 config.ini

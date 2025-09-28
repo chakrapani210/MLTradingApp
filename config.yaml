@@ -1,0 +1,229 @@
+# ML Trading Application Configuration
+# ===================================
+
+# Trading Configuration
+trading:
+  # List of stocks to analyze and trade
+  symbols: 
+    - "TSLA"    # Tesla
+    - "AAPL"    # Apple
+    - "NVDA"    # NVIDIA
+    - "MSFT"    # Microsoft
+    - "GOOGL"   # Google
+  
+  # Default symbol for single-stock analysis
+  default_symbol: "TSLA"
+  
+  # Trading parameters
+  shares_per_trade: 20
+  market_impact: 0.005  # 0.5% market impact
+  
+  # Position tracking files (will be created as {symbol}.txt)
+  position_file_extension: ".txt"
+
+# Model Management Configuration
+model_management:
+  # Model storage settings
+  models_base_path: "models"
+  
+  # Version management
+  max_versions_per_symbol: 5  # Keep only 5 versions per symbol
+  auto_cleanup: true          # Automatically cleanup old versions
+  
+  # Model training settings
+  auto_save_models: true      # Automatically save trained models
+  use_model_cache: true       # Cache models in memory for faster predictions
+  
+  # Model validation settings
+  validation_split: 0.2       # Use 20% of training data for validation
+  min_training_accuracy: 0.6  # Minimum acceptable training accuracy
+  
+  # Real-time prediction settings
+  prediction_service:
+    enabled: true               # Use prediction service for real-time predictions
+    confidence_threshold: 0.7   # Minimum confidence for predictions
+    cache_predictions: true     # Cache recent predictions
+  
+  # Model retraining triggers
+  retraining:
+    performance_threshold: 0.05  # Retrain if accuracy drops by 5%
+    days_since_training: 30      # Retrain if model is older than 30 days
+    market_regime_change: true   # Retrain on significant market regime changes
+
+# Data Configuration
+data:
+  # Training data periods (in months)
+  training_period_months: 12  # Optimal: 12 months based on analysis
+  
+  # Testing/simulation periods
+  simulation:
+    # For backtesting - can be overridden for specific analysis
+    start_date: "2025-07-01"
+    end_date: "2025-12-31"
+  
+  # Live trading data periods
+  live_trading:
+    # How many days back to get recent data for prediction
+    lookback_days: 30
+    
+  # Historical analysis periods
+  analysis:
+    # Different test periods for comprehensive analysis
+    tesla_analysis:
+      train_start: "2020-01-01"
+      train_end: "2025-07-01"  
+      test_start: "2025-07-01"
+      test_end: "2025-12-31"
+    
+    tqqq_analysis:
+      train_start: "2015-01-01"
+      train_end: "2019-01-01"
+      test_start: "2019-05-05" 
+      test_end: "2020-01-01"
+    
+    sqqq_analysis:
+      train_start: "2020-01-01"
+      train_end: "2025-07-01"
+      test_start: "2025-07-01"
+      test_end: "2025-12-31"
+
+# Technical Indicators Configuration  
+indicators:
+  # Window size for technical indicators
+  window: 5
+  
+  # Which indicators to use (true = include, false = exclude)
+  use_sma: true
+  use_bollinger_bands: true
+  use_momentum: true
+  use_volatility: true
+  use_macd: true
+  
+  # Market context indicators (NEW!)
+  use_market_context: true
+  market_indices: ["SPY", "QQQ"]  # Market indices for context
+  use_spy_trend: true
+  use_qqq_trend: true
+  use_relative_strength: true
+  use_beta_features: true
+  use_market_volatility_regime: true
+  use_sector_rotation: true
+  use_market_breadth: true
+  
+  # Which Bollinger Band components to drop (to avoid multicollinearity)
+  drop_upper_bb: true
+  drop_lower_bb: true
+  keep_bb_value: true  # Normalized Bollinger Band position
+
+# Enhanced ML Model Configuration
+ml_model:
+  # Model type and parameters
+  algorithm: "DecisionTree"  # Options: DecisionTree, RandomForest
+  max_depth: 5
+  random_state: 42
+  
+  # For RandomForest (if used)
+  n_estimators: 100
+  
+  # Training thresholds
+  min_training_samples: 100
+  min_labels_required: 20
+  
+  # Enhanced features configuration
+  use_enhanced_features: true
+  feature_selection: "auto"  # auto, manual, importance_based
+  
+  # Retraining configuration
+  retraining:
+    # Default retraining frequency (in trading days)
+    default_frequency: 10  # Bi-weekly based on analysis
+    
+    # Stock-specific frequencies
+    high_volatility_frequency: 5   # Weekly for volatile stocks
+    medium_volatility_frequency: 10 # Bi-weekly for medium volatility
+    low_volatility_frequency: 22   # Monthly for stable stocks
+    
+    # Volatility thresholds for categorization
+    high_volatility_threshold: 0.8  # 80th percentile
+    medium_volatility_threshold: 0.4 # 40th percentile
+    
+    # Performance-based triggers
+    accuracy_threshold: 0.30  # Retrain if accuracy drops below 30%
+    
+# Portfolio Configuration
+portfolio:
+  # Starting portfolio value for simulations
+  starting_value: 3000
+  
+  # Risk management
+  commission: 0.0  # Commission per trade
+  impact: 0.005    # Market impact (same as market_impact above)
+  
+  # Position sizing
+  max_position_size: 20  # Maximum shares per position
+  
+# Robinhood Configuration (for live trading)
+robinhood:
+  # Login credentials (should be set via environment variables in production)
+  username: "username@gmail.com"
+  password: "P@ssw0rd" 
+  qr_code: "123456789qwertyu"  # 2FA QR code
+  
+  # Trading parameters
+  order_type: "market"  # market or limit
+  time_in_force: "GFD"  # Good For Day
+  
+  # Safety settings
+  enable_live_trading: false  # Set to true only when ready for live trading
+  paper_trading: true         # Use paper trading for testing
+
+# Analysis Configuration
+analysis:
+  # Performance metrics to calculate
+  calculate_sharpe: true
+  calculate_returns: true
+  calculate_volatility: true
+  calculate_max_drawdown: true
+  
+  # Plotting configuration
+  generate_plots: true
+  plot_strategy_performance: true
+  save_plots: true
+  plot_directory: "plots"
+  
+  # Reporting
+  generate_reports: true
+  report_directory: "reports"
+  
+  # Logging
+  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  log_file: "trading.log"
+
+# Experimental Features
+experimental:
+  # Advanced retraining strategies
+  adaptive_retraining: true
+  volatility_based_retraining: true
+  
+  # Enhanced features 
+  multi_timeframe_analysis: false
+  sector_analysis: false
+  correlation_analysis: false
+  
+  # Feature engineering
+  additional_indicators: false
+  custom_features: false
+
+# Environment Configuration
+environment:
+  # Data sources
+  data_source: "yfinance"  # Options: yfinance, alpha_vantage, quandl
+  
+  # Cache settings
+  cache_data: true
+  cache_directory: "cache"
+  cache_expiry_hours: 24
+  
+  # Performance
+  parallel_processing: false
+  max_workers: 4

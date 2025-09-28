@@ -8,6 +8,8 @@ import yfinance as yf
 import yahoofinancials
 from indicators import compute_indicators
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from config_manager import get_config
 
 
 def get_stock_data(symbol,sd=dt.datetime(2018,1,1),ed=dt.datetime(2019,1,1)):
@@ -20,21 +22,29 @@ def get_stock_data(symbol,sd=dt.datetime(2018,1,1),ed=dt.datetime(2019,1,1)):
 	return adj_close.to_frame()
 
 def get_indicator_data(data,symbol,window,train=True):
+	config = get_config()
+	indicator_settings = config.get_indicator_settings()
+	
 	indicators = compute_indicators(data,symbol,window=window)
 	indicators.fillna(0,inplace=True)
 	indicator_data = indicators.copy()
 	if train:
 		indicator_data = indicator_data[:-3]
-	indicator_data.drop('Upper_BB', axis=1, inplace=True)
-	indicator_data.drop('Down_BB', axis=1, inplace=True)
-	#indicator_data.drop('Volatility', axis=1, inplace=True)
-	#indicator_data.drop('Momentum', axis=1, inplace=True)
-	#indicator_data.drop('BB_val', axis=1, inplace=True)
-	#indicator_data.drop('MACD', axis=1, inplace=True)
+	
+	# Drop indicators based on configuration
+	if indicator_settings['drop_upper_bb']:
+		indicator_data.drop('Upper_BB', axis=1, inplace=True)
+	if indicator_settings['drop_lower_bb']:
+		indicator_data.drop('Down_BB', axis=1, inplace=True)
+	
 	indicator_data = indicator_data.values
 	return indicator_data
 
-def get_labels(prices,market_impact):
+def get_labels(prices, market_impact=None):
+	config = get_config()
+	if market_impact is None:
+		market_impact = config.get_market_impact()
+	
 	labels = np.zeros(prices.shape[0]-3)
 	for i in range(prices.shape[0]-3):
 		ret = (prices.values[i+3] - prices.values[i])
@@ -48,39 +58,56 @@ def create_trades_df(prices,symbol,Y_test):
 	trades = pd.DataFrame(index = prices.index) 
 	trades[symbol] = 0
 	shares = 0
+	config = get_config()
+	shares_per_trade = config.get_shares_per_trade()
+	
 	for i in range(prices.shape[0]-3):
 		if shares == 0 and Y_test[i] == 1:
-			trades.iloc[i,0] = 20
-			shares = 20
+			trades.iloc[i,0] = shares_per_trade
+			shares = shares_per_trade
 		elif shares > 0 and Y_test[i] == -1:
-			trades.iloc[i,0] = -20
+			trades.iloc[i,0] = -shares_per_trade
 			shares = 0
 	return trades
 
 
 
-# Provide a set of stocks and get historical data
-symbols = ['TSLA']
+# Load configuration and get stocks and dates
+config = get_config()
+symbols = [config.get_default_symbol()]  # Use default symbol for simulation
 
-sd_train = dt.datetime(2020,1,1)
-ed_train = dt.datetime(2025,7,1)
-sd_test = dt.datetime(2025,7,1)
-ed_test = dt.datetime(2025,12,31)
+# Get analysis dates from configuration
+analysis_type = 'tesla_analysis'  # Can be made configurable
+sd_train, ed_train, sd_test, ed_test = config.get_analysis_dates(analysis_type)
 
 for symbol in symbols:
 	stock_df_train = get_stock_data(symbol,sd_train,ed_train)
 	stock_df_train.columns = [symbol]
-	indicators_train = get_indicator_data(stock_df_train,symbol,window=5,train=True)
-	labels_train = get_labels(stock_df_train,market_impact=0.005)	
+	window_size = config.get_indicator_window()
+	indicators_train = get_indicator_data(stock_df_train,symbol,window=window_size,train=True)
+	labels_train = get_labels(stock_df_train)	
 
 	stock_df_test = get_stock_data(symbol,sd_test,ed_test)
 	stock_df_test.columns = [symbol]
-	indicators_test = get_indicator_data(stock_df_test,symbol,window=5,train=False)
+	window_size = config.get_indicator_window()
+	indicators_test = get_indicator_data(stock_df_test,symbol,window=window_size,train=False)
 
-	clf = DecisionTreeClassifier(max_depth=5)
+	# Create ML model based on configuration
+	ml_config = config.get_ml_config()
+	if ml_config['algorithm'] == 'RandomForest':
+		clf = RandomForestClassifier(
+			n_estimators=ml_config['n_estimators'],
+			max_depth=ml_config['max_depth'],
+			random_state=ml_config['random_state']
+		)
+	else:
+		clf = DecisionTreeClassifier(
+			max_depth=ml_config['max_depth'],
+			random_state=ml_config['random_state']
+		)
 	clf.fit(indicators_train, labels_train)
 	labels_test = clf.predict(indicators_test[:-3])
-	labels_true = get_labels(stock_df_test, market_impact=0.005)
+	labels_true = get_labels(stock_df_test)
 	
 	# Print technical indicators information
 	print(f"\n=== TECHNICAL INDICATORS ANALYSIS FOR {symbol} ===")
@@ -88,7 +115,7 @@ for symbol in symbols:
 	print(f"Testing period: {sd_test.strftime('%Y-%m-%d')} to {ed_test.strftime('%Y-%m-%d')}")
 	
 	# Get the full indicators dataframe for analysis
-	indicators_full = compute_indicators(stock_df_test, symbol, window=5)
+	indicators_full = compute_indicators(stock_df_test, symbol, window=window_size)
 	indicators_full.fillna(0, inplace=True)
 	
 	print(f"\nAvailable Technical Indicators:")
@@ -122,7 +149,15 @@ for symbol in symbols:
 	
 	trades_df = create_trades_df(stock_df_test,symbol,labels_test)
 	orders = trades2orders(trades_df,symbol)
-	strategy_pval = compute_portvals(stock_df_test,orders,start_val=3000,commission=0.0,impact=0.005)
+	
+	# Use portfolio configuration
+	portfolio_config = config.get_portfolio_config()
+	strategy_pval = compute_portvals(
+		stock_df_test, orders, 
+		start_val=portfolio_config['starting_value'],
+		commission=portfolio_config['commission'],
+		impact=portfolio_config['impact']
+	)
 	crb,adrb,sddrb,srb = compute_stats(strategy_pval)
 	strategy_pval = strategy_pval / strategy_pval[0]
 
