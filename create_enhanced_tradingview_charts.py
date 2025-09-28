@@ -52,8 +52,8 @@ def create_symbol_chart_with_trades(symbol, config, sma_short, sma_long, rsi_per
     start_date = end_date - dt.timedelta(days=365)
     train_end = start_date + dt.timedelta(days=183)
     
-    # Get market data with OHLC for candlestick charts
-    stock_data = get_market_data([symbol], train_end, end_date, include_ohlc=True)[symbol]
+    # Get market data with OHLC for candlestick charts - FULL PERIOD for complete chart
+    stock_data = get_market_data([symbol], start_date, end_date, include_ohlc=True)[symbol]
     
     # Also get close-only data for strategy simulation (legacy compatibility)
     close_data = get_market_data([symbol], train_end, end_date, include_ohlc=False)[symbol]
