@@ -1,19 +1,19 @@
 {
-  "symbol": "TSLA",
+  "symbol": "NVDA",
   "version": 1,
-  "timestamp": "20250927_204537",
-  "model_path": "models\\trained_models\\TSLA\\TSLA_v1_20250927_204537.pkl",
+  "timestamp": "20250927_223737",
+  "model_path": "models\\trained_models\\NVDA\\NVDA_v1_20250927_223737.pkl",
   "model_type": "DecisionTreeClassifier",
   "training_info": {
-    "train_start": "2024-03-31T00:00:00",
-    "train_end": "2025-03-31T00:00:00",
-    "training_samples": 247,
+    "train_start": "2023-10-03T00:00:00",
+    "train_end": "2024-10-02T00:00:00",
+    "training_samples": 248,
     "feature_count": 17
   },
   "performance": {
-    "training_accuracy": 0.7489878542510121,
+    "training_accuracy": 0.7540322580645161,
     "algorithm": "DecisionTree",
-    "training_samples": 247,
+    "training_samples": 248,
     "feature_count": 17
   },
   "features": {
@@ -51,6 +51,65 @@
       "default_symbol": "TSLA",
       "shares_per_trade": 20,
       "market_impact": 0.005,
+      "indicators": {
+        "sma_short": 50,
+        "sma_long": 200,
+        "rsi_period": 14,
+        "rsi_overbought": 70,
+        "rsi_oversold": 30,
+        "bollinger_period": 20,
+        "bollinger_std": 2,
+        "macd_fast": 12,
+        "macd_slow": 26,
+        "macd_signal": 9
+      },
+      "order_sizing": {
+        "strategy": "volatility_adjusted",
+        "fixed": {
+          "shares": 20
+        },
+        "percentage": {
+          "portfolio_pct": 0.05,
+          "min_shares": 1,
+          "max_shares": 100
+        },
+        "volatility_adjusted": {
+          "base_shares": 20,
+          "volatility_window": 20,
+          "volatility_target": 0.02,
+          "min_shares": 5,
+          "max_shares": 200,
+          "adjustment_factor": 1.5
+        },
+        "kelly_criterion": {
+          "base_portfolio_pct": 0.1,
+          "win_rate": 0.55,
+          "avg_win": 0.08,
+          "avg_loss": 0.06,
+          "min_shares": 1,
+          "max_shares": 150,
+          "kelly_fraction": 0.25
+        },
+        "risk_parity": {
+          "portfolio_risk_budget": 0.15,
+          "lookback_days": 30,
+          "min_shares": 1,
+          "max_shares": 100
+        },
+        "market_conditions": {
+          "enabled": true,
+          "bull_market_multiplier": 1.2,
+          "bear_market_multiplier": 0.7,
+          "high_vix_threshold": 25,
+          "low_vix_threshold": 15,
+          "vix_adjustment_factor": 0.1
+        },
+        "limits": {
+          "max_position_pct": 0.2,
+          "max_daily_trades": 10,
+          "max_portfolio_heat": 0.5
+        }
+      },
       "position_file_extension": ".txt"
     },
     "model_management": {
@@ -191,6 +250,6 @@
       "max_workers": 4
     }
   },
-  "created_at": "2025-09-27T20:45:37.602764",
+  "created_at": "2025-09-27T22:37:37.174868",
   "model_size_bytes": 5783
 }

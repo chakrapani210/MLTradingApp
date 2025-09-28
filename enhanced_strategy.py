@@ -7,7 +7,7 @@ import datetime as dt
 import pandas as pd
 import numpy as np
 import warnings
-from typing import Tuple, Optional, List, Dict
+from typing import Tuple, Optional, List, Dict, Any
 from marketsimcode import compute_stats, trades2orders, compute_portvals
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
@@ -19,6 +19,255 @@ from model_management import ModelManager, ModelPredictionService
 # Suppress pandas warnings for cleaner output
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning)
+
+
+class AutoOrderSizeManager:
+    """
+    Intelligent Order Size Management System
+    
+    Supports multiple sizing strategies:
+    - Fixed: Always use the same number of shares
+    - Percentage: Size based on portfolio percentage
+    - Volatility Adjusted: Adjust size based on stock volatility
+    - Kelly Criterion: Optimal sizing based on win rate and risk/reward
+    - Risk Parity: Size based on risk contribution to portfolio
+    """
+    
+    def __init__(self, config_manager):
+        """Initialize the order size manager"""
+        self.config = config_manager
+        self.strategy = self.config.get_order_sizing_strategy()
+        self.current_portfolio_value = 0
+        self.current_positions = {}
+        
+        # Get technical indicator settings
+        trading_config = self.config.config.get('trading', {})
+        self.sma_short = trading_config.get('indicators', {}).get('sma_short', 50)
+        self.sma_long = trading_config.get('indicators', {}).get('sma_long', 200)
+        
+        print(f"[ORDER_SIZE] Auto Order Size Manager initialized")
+        print(f"             Strategy: {self.strategy}")
+        print(f"             SMA Settings: {self.sma_short}/{self.sma_long}")
+    
+    def get_sma_config(self):
+        """Get SMA configuration values"""
+        return self.sma_short, self.sma_long
+    
+    def calculate_order_size(self, symbol: str, signal: int, current_price: float, 
+                           stock_data: pd.DataFrame, portfolio_value: float = None) -> int:
+        """
+        Calculate optimal order size based on configured strategy
+        
+        Args:
+            symbol (str): Trading symbol
+            signal (int): Trading signal (1=BUY, -1=SELL, 0=HOLD)
+            current_price (float): Current stock price
+            stock_data (pd.DataFrame): Historical stock data for volatility calculations
+            portfolio_value (float): Current portfolio value
+            
+        Returns:
+            int: Number of shares to trade (positive for buy, negative for sell)
+        """
+        if signal == 0:  # HOLD signal
+            return 0
+            
+        if portfolio_value:
+            self.current_portfolio_value = portfolio_value
+            
+        # Calculate base size using selected strategy
+        if self.strategy == 'fixed':
+            base_size = self._calculate_fixed_size()
+        elif self.strategy == 'percentage':
+            base_size = self._calculate_percentage_size(current_price)
+        elif self.strategy == 'volatility_adjusted':
+            base_size = self._calculate_volatility_adjusted_size(stock_data, current_price)
+        elif self.strategy == 'kelly_criterion':
+            base_size = self._calculate_kelly_size(current_price)
+        elif self.strategy == 'risk_parity':
+            base_size = self._calculate_risk_parity_size(stock_data, current_price)
+        else:
+            # Default to fixed if unknown strategy
+            base_size = self._calculate_fixed_size()
+        
+        # Apply market condition adjustments
+        adjusted_size = self._apply_market_conditions_adjustment(base_size, stock_data)
+        
+        # Apply position limits
+        final_size = self._apply_position_limits(adjusted_size, symbol, current_price, signal)
+        
+        # Ensure minimum viable size
+        if abs(final_size) < 1:
+            final_size = 1 if signal > 0 else -1
+            
+        return int(final_size * signal)  # Apply signal direction
+    
+    def _calculate_fixed_size(self) -> int:
+        """Calculate fixed order size"""
+        config = self.config.get_fixed_sizing_config()
+        return config['shares']
+    
+    def _calculate_percentage_size(self, current_price: float) -> int:
+        """Calculate percentage-based order size"""
+        config = self.config.get_percentage_sizing_config()
+        
+        if self.current_portfolio_value <= 0:
+            portfolio_config = self.config.get_portfolio_config()
+            self.current_portfolio_value = portfolio_config['starting_value']
+        
+        target_value = self.current_portfolio_value * config['portfolio_pct']
+        shares = int(target_value / current_price)
+        
+        # Apply min/max constraints
+        shares = max(config['min_shares'], min(config['max_shares'], shares))
+        return shares
+    
+    def _calculate_volatility_adjusted_size(self, stock_data: pd.DataFrame, current_price: float) -> int:
+        """Calculate volatility-adjusted order size"""
+        config = self.config.get_volatility_adjusted_config()
+        
+        # Calculate recent volatility
+        window = config['volatility_window']
+        if len(stock_data) < window:
+            window = len(stock_data)
+            
+        recent_data = stock_data.tail(window)
+        daily_returns = recent_data.pct_change().dropna()
+        current_volatility = daily_returns.std().iloc[0] if not daily_returns.empty else 0.02
+        
+        # Adjust base size based on volatility
+        target_volatility = config['volatility_target']
+        adjustment_factor = config['adjustment_factor']
+        
+        if current_volatility > 0:
+            volatility_ratio = target_volatility / current_volatility
+            adjusted_size = config['base_shares'] * (volatility_ratio ** adjustment_factor)
+        else:
+            adjusted_size = config['base_shares']
+        
+        # Apply min/max constraints
+        adjusted_size = max(config['min_shares'], min(config['max_shares'], int(adjusted_size)))
+        return adjusted_size
+    
+    def _calculate_kelly_size(self, current_price: float) -> int:
+        """Calculate Kelly Criterion optimal size"""
+        config = self.config.get_kelly_criterion_config()
+        
+        # Kelly formula: f = (bp - q) / b
+        # where f = fraction to bet, b = odds received, p = win probability, q = loss probability
+        win_rate = config['win_rate']
+        avg_win = config['avg_win']
+        avg_loss = config['avg_loss']
+        
+        # Calculate Kelly fraction
+        if avg_loss > 0:
+            kelly_fraction = (avg_win * win_rate - avg_loss * (1 - win_rate)) / avg_win
+        else:
+            kelly_fraction = 0
+        
+        # Apply conservative fraction (typically 0.25 of full Kelly)
+        conservative_kelly = kelly_fraction * config['kelly_fraction']
+        conservative_kelly = max(0, min(1, conservative_kelly))  # Clamp to [0, 1]
+        
+        # Calculate position size
+        if self.current_portfolio_value <= 0:
+            portfolio_config = self.config.get_portfolio_config()
+            self.current_portfolio_value = portfolio_config['starting_value']
+        
+        base_allocation = self.current_portfolio_value * config['base_portfolio_pct']
+        kelly_allocation = base_allocation * (1 + conservative_kelly)
+        shares = int(kelly_allocation / current_price)
+        
+        # Apply min/max constraints
+        shares = max(config['min_shares'], min(config['max_shares'], shares))
+        return shares
+    
+    def _calculate_risk_parity_size(self, stock_data: pd.DataFrame, current_price: float) -> int:
+        """Calculate risk parity based size"""
+        config = self.config.get_risk_parity_config()
+        
+        # Calculate stock volatility for risk budgeting
+        lookback = config['lookback_days']
+        if len(stock_data) < lookback:
+            lookback = len(stock_data)
+            
+        recent_data = stock_data.tail(lookback)
+        daily_returns = recent_data.pct_change().dropna()
+        stock_volatility = daily_returns.std().iloc[0] if not daily_returns.empty else 0.02
+        
+        # Risk parity sizing: allocate based on inverse volatility
+        if self.current_portfolio_value <= 0:
+            portfolio_config = self.config.get_portfolio_config()
+            self.current_portfolio_value = portfolio_config['starting_value']
+        
+        risk_budget = self.current_portfolio_value * config['portfolio_risk_budget']
+        
+        # Size position to contribute target risk to portfolio
+        if stock_volatility > 0:
+            position_value = risk_budget / stock_volatility
+            shares = int(position_value / current_price)
+        else:
+            shares = config['min_shares']
+        
+        # Apply min/max constraints
+        shares = max(config['min_shares'], min(config['max_shares'], shares))
+        return shares
+    
+    def _apply_market_conditions_adjustment(self, base_size: int, stock_data: pd.DataFrame) -> int:
+        """Apply market condition based adjustments"""
+        config = self.config.get_market_conditions_config()
+        
+        if not config.get('enabled', False):
+            return base_size
+        
+        adjusted_size = base_size
+        
+        # Simple market regime detection based on recent returns
+        if len(stock_data) >= 20:
+            recent_returns = stock_data.pct_change().tail(20).mean().iloc[0]
+            
+            if recent_returns > 0.01:  # Bull market (1%+ average daily return)
+                adjusted_size *= config['bull_market_multiplier']
+            elif recent_returns < -0.01:  # Bear market (-1%+ average daily return)
+                adjusted_size *= config['bear_market_multiplier']
+        
+        return int(adjusted_size)
+    
+    def _apply_position_limits(self, size: int, symbol: str, current_price: float, signal: int) -> int:
+        """Apply position and risk limits"""
+        config = self.config.get_position_limits_config()
+        
+        if self.current_portfolio_value <= 0:
+            portfolio_config = self.config.get_portfolio_config()
+            self.current_portfolio_value = portfolio_config['starting_value']
+        
+        # Check maximum position size
+        max_position_value = self.current_portfolio_value * config['max_position_pct']
+        max_shares = int(max_position_value / current_price)
+        
+        # Apply position limit
+        limited_size = min(abs(size), max_shares)
+        
+        return limited_size
+    
+    def update_position(self, symbol: str, shares: int, price: float):
+        """Update current position tracking"""
+        if symbol not in self.current_positions:
+            self.current_positions[symbol] = 0
+        
+        self.current_positions[symbol] += shares
+        
+    def get_current_position(self, symbol: str) -> int:
+        """Get current position for symbol"""
+        return self.current_positions.get(symbol, 0)
+    
+    def get_position_summary(self) -> Dict[str, Any]:
+        """Get summary of current positions"""
+        return {
+            'positions': self.current_positions.copy(),
+            'total_symbols': len(self.current_positions),
+            'portfolio_value': self.current_portfolio_value,
+            'strategy': self.strategy
+        }
 
 
 class EnhancedTradingStrategy:
@@ -47,7 +296,13 @@ class EnhancedTradingStrategy:
         # Initialize model management
         self.model_manager = ModelManager()
         self.prediction_service = ModelPredictionService(self.model_manager)
+        
+        # Initialize auto order size manager
+        self.order_size_manager = AutoOrderSizeManager(self.config)
+        
         print("[INIT] Enhanced Trading Strategy with Model Management initialized")
+        print(f"       Models directory: {self.model_manager.models_dir}")
+        print(f"       Order sizing strategy: {self.config.get_order_sizing_strategy()}")
         print(f"       Models directory: {self.model_manager.models_dir}")
         
     def check_existing_model(self, symbol: str) -> bool:
@@ -271,18 +526,31 @@ class EnhancedTradingStrategy:
         # Get test stock data
         stock_data = get_market_data([symbol], test_start, test_end)[symbol]
         
-        # Create trades
+        # Calculate benchmark return (needed for both cases)
+        initial_price = stock_data.iloc[0, 0]
+        final_price = stock_data.iloc[-1, 0]
+        buy_hold_return = (final_price - initial_price) / initial_price
+        
+        # Create trades with intelligent order sizing
         trades_df = self._create_trades_dataframe(stock_data, symbol, predictions)
         orders = trades2orders(trades_df, symbol)
+        
+        # Store trade details for chart access
+        self.latest_trade_details = getattr(self, 'trade_details', [])
+        
+        # Analyze order sizing performance
+        order_sizing_analysis = self.analyze_order_sizing_performance(trades_df, stock_data)
         
         trading_summary = {
             'total_orders': len(orders),
             'buy_orders': len(orders[orders['ORDER'] == 'BUY']) if len(orders) > 0 else 0,
-            'sell_orders': len(orders[orders['ORDER'] == 'SELL']) if len(orders) > 0 else 0
+            'sell_orders': len(orders[orders['ORDER'] == 'SELL']) if len(orders) > 0 else 0,
+            'order_sizing': order_sizing_analysis
         }
         
         print(f"           [OK] Orders executed: {trading_summary['total_orders']}")
         print(f"           [OK] Buys: {trading_summary['buy_orders']}, Sells: {trading_summary['sell_orders']}")
+        print(f"           [OK] Avg order size: {order_sizing_analysis.get('avg_order_size', 0):.1f} shares")
         
         # Calculate performance
         if len(orders) > 0:
@@ -296,11 +564,6 @@ class EnhancedTradingStrategy:
             
             # Calculate metrics
             cr, adr, sddr, sr = compute_stats(portfolio_values)
-            
-            # Benchmark comparison
-            initial_price = stock_data.iloc[0, 0]
-            final_price = stock_data.iloc[-1, 0]
-            buy_hold_return = (final_price - initial_price) / initial_price
             
             performance = {
                 'strategy_return': float(cr),
@@ -475,21 +738,216 @@ class EnhancedTradingStrategy:
     
     def _create_trades_dataframe(self, prices: pd.DataFrame, symbol: str, 
                                predictions: np.ndarray) -> pd.DataFrame:
-        """Create trades DataFrame from predictions"""
+        """Create trades DataFrame from predictions with intelligent order sizing"""
+        print(f"[ORDER_SIZE] Creating trades with intelligent order sizing")
+        print(f"             Strategy: {self.config.get_order_sizing_strategy()}")
+        
         trades = pd.DataFrame(index=prices.index)
         trades[symbol] = 0
-        shares = 0
-        shares_per_trade = self.config.get_shares_per_trade()
+        
+        # Enhanced tracking for decision reasons and order details
+        self.trade_details = []
+        self.decision_reasons = []
+        
+        # Get portfolio configuration for portfolio value tracking
+        portfolio_config = self.config.get_portfolio_config()
+        current_portfolio_value = portfolio_config['starting_value']
+        current_shares = 0
+        total_trades = 0
+        
+        # Track order sizes for analysis
+        order_sizes = []
+        order_prices = []
         
         for i in range(len(predictions)):
-            if shares == 0 and predictions[i] == 1:  # BUY signal
-                trades.iloc[i, 0] = shares_per_trade
-                shares = shares_per_trade
-            elif shares > 0 and predictions[i] == -1:  # SELL signal
-                trades.iloc[i, 0] = -shares_per_trade
-                shares = 0
+            current_price = float(prices.iloc[i, 0])
+            signal = predictions[i]
+            current_date = prices.index[i]
+            
+            if signal != 0:  # BUY or SELL signal
+                # Calculate intelligent order size
+                order_size = self.order_size_manager.calculate_order_size(
+                    symbol=symbol,
+                    signal=signal,
+                    current_price=current_price,
+                    stock_data=prices[:i+1],  # Historical data up to current point
+                    portfolio_value=current_portfolio_value
+                )
+                
+                # Generate decision reason
+                decision_reason = self._generate_decision_reason(
+                    signal, current_price, prices[:i+1], i, current_shares
+                )
+                
+                # Apply trading logic
+                if signal == 1 and current_shares == 0:  # BUY signal when no position
+                    trades.iloc[i, 0] = order_size
+                    current_shares = order_size
+                    current_portfolio_value -= order_size * current_price
+                    total_trades += 1
+                    order_sizes.append(order_size)
+                    order_prices.append(current_price)
+                    
+                    # Track trade details
+                    self.trade_details.append({
+                        'date': current_date,
+                        'action': 'BUY',
+                        'shares': order_size,
+                        'price': current_price,
+                        'value': order_size * current_price,
+                        'reason': decision_reason
+                    })
+                    
+                    # Update position in order size manager
+                    self.order_size_manager.update_position(symbol, order_size, current_price)
+                    
+                elif signal == -1 and current_shares > 0:  # SELL signal when holding position
+                    # Use the current position size for selling
+                    sell_size = current_shares
+                    trades.iloc[i, 0] = -sell_size
+                    current_portfolio_value += sell_size * current_price
+                    current_shares = 0
+                    total_trades += 1
+                    order_sizes.append(sell_size)
+                    order_prices.append(current_price)
+                    
+                    # Track trade details
+                    self.trade_details.append({
+                        'date': current_date,
+                        'action': 'SELL',
+                        'shares': sell_size,
+                        'price': current_price,
+                        'value': sell_size * current_price,
+                        'reason': decision_reason
+                    })
+                    
+                    # Update position in order size manager
+                    self.order_size_manager.update_position(symbol, -sell_size, current_price)
+        
+        # Print order sizing analysis
+        if order_sizes:
+            avg_order_size = np.mean(order_sizes)
+            std_order_size = np.std(order_sizes)
+            min_order_size = np.min(order_sizes)
+            max_order_size = np.max(order_sizes)
+            
+            print(f"             [OK] Total trades: {total_trades}")
+            print(f"             [OK] Avg order size: {avg_order_size:.1f} shares")
+            print(f"             [OK] Order size range: {min_order_size} - {max_order_size} shares")
+            print(f"             [OK] Order size std: {std_order_size:.1f}")
+        else:
+            print(f"             [WARN] No trades generated")
         
         return trades
+    
+    def _generate_decision_reason(self, signal: int, current_price: float, 
+                                 historical_data: pd.DataFrame, current_idx: int, 
+                                 current_shares: int) -> str:
+        """Generate human-readable decision reasoning for trades"""
+        reasons = []
+        
+        # Get SMA values from config
+        sma_short, sma_long = self.order_size_manager.get_sma_config()
+        
+        # Calculate technical indicators for reasoning
+        if len(historical_data) >= sma_long:
+            sma_short_val = historical_data.iloc[:, 0].rolling(window=sma_short).mean().iloc[-1]
+            sma_long_val = historical_data.iloc[:, 0].rolling(window=sma_long).mean().iloc[-1]
+            
+            if signal == 1:  # BUY signal
+                reasons.append(f"ML model predicts upward trend")
+                if sma_short_val > sma_long_val:
+                    reasons.append(f"Golden Cross: SMA{sma_short} ({sma_short_val:.2f}) > SMA{sma_long} ({sma_long_val:.2f})")
+                else:
+                    reasons.append(f"SMA{sma_short} ({sma_short_val:.2f}) approaching SMA{sma_long} ({sma_long_val:.2f})")
+                
+                if current_shares == 0:
+                    reasons.append("No current position - entering long")
+                
+            elif signal == -1:  # SELL signal
+                reasons.append(f"ML model predicts downward trend")
+                if sma_short_val < sma_long_val:
+                    reasons.append(f"Death Cross: SMA{sma_short} ({sma_short_val:.2f}) < SMA{sma_long} ({sma_long_val:.2f})")
+                else:
+                    reasons.append(f"SMA{sma_short} ({sma_short_val:.2f}) declining from SMA{sma_long} ({sma_long_val:.2f})")
+                
+                if current_shares > 0:
+                    reasons.append(f"Closing position of {current_shares} shares")
+        
+        # Add price context
+        if len(historical_data) >= 5:
+            price_change = (current_price - historical_data.iloc[-5, 0]) / historical_data.iloc[-5, 0] * 100
+            if price_change > 0:
+                reasons.append(f"Price up {price_change:.1f}% in last 5 days")
+            else:
+                reasons.append(f"Price down {abs(price_change):.1f}% in last 5 days")
+        
+        # Add volatility context
+        if len(historical_data) >= 20:
+            returns = historical_data.iloc[:, 0].pct_change().dropna()
+            volatility = returns.rolling(20).std().iloc[-1] * 100
+            reasons.append(f"20-day volatility: {volatility:.1f}%")
+        
+        return " | ".join(reasons)
+    
+    def get_trade_details(self) -> List[Dict]:
+        """Get detailed trade information for chart visualization"""
+        return getattr(self, 'trade_details', [])
+    
+    def analyze_order_sizing_performance(self, trades_df: pd.DataFrame, prices: pd.DataFrame) -> Dict:
+        """Analyze the performance of the order sizing strategy"""
+        print(f"[ORDER_SIZE] Analyzing Order Sizing Performance")
+        
+        # Extract non-zero trades
+        trades = trades_df[trades_df.iloc[:, 0] != 0]
+        
+        if len(trades) == 0:
+            return {
+                'total_trades': 0,
+                'avg_order_size': 0,
+                'order_size_efficiency': 0,
+                'size_distribution': {}
+            }
+        
+        # Calculate order sizing metrics
+        order_sizes = trades.iloc[:, 0].abs().values
+        total_trades = len(order_sizes)
+        avg_order_size = np.mean(order_sizes)
+        std_order_size = np.std(order_sizes) if len(order_sizes) > 1 else 0
+        min_order_size = np.min(order_sizes)
+        max_order_size = np.max(order_sizes)
+        
+        # Calculate order size efficiency (measure of size adaptation)
+        size_coefficient_of_variation = (std_order_size / avg_order_size) if avg_order_size > 0 else 0
+        
+        # Size distribution analysis
+        size_bins = np.histogram(order_sizes, bins=5)
+        size_distribution = {
+            f"bin_{i}": int(count) for i, count in enumerate(size_bins[0])
+        }
+        
+        # Calculate position sizing risk metrics
+        position_summary = self.order_size_manager.get_position_summary()
+        
+        analysis = {
+            'total_trades': int(total_trades),
+            'avg_order_size': float(avg_order_size),
+            'std_order_size': float(std_order_size),
+            'min_order_size': int(min_order_size),
+            'max_order_size': int(max_order_size),
+            'size_coefficient_of_variation': float(size_coefficient_of_variation),
+            'order_size_efficiency': float(1 - size_coefficient_of_variation),  # Higher is better
+            'size_distribution': size_distribution,
+            'position_summary': position_summary,
+            'sizing_strategy': self.config.get_order_sizing_strategy()
+        }
+        
+        print(f"             [OK] Total trades: {total_trades}")
+        print(f"             [OK] Avg order size: {avg_order_size:.1f} shares")
+        print(f"             [OK] Size range: {min_order_size} - {max_order_size}")
+        print(f"             [OK] Size efficiency: {analysis['order_size_efficiency']:.3f}")
+        
+        return analysis
     
     def _print_summary_report(self, results: Dict) -> None:
         """Print a comprehensive summary report"""
@@ -529,6 +987,17 @@ class EnhancedTradingStrategy:
         print(f"   Buy signals: {sa['buy_signals']} ({sa['buy_percentage']:.1f}%)")
         print(f"   Sell signals: {sa['sell_signals']}")
         print(f"   Total predictions: {sa['total_predictions']}")
+        
+        # Order Sizing Analysis
+        if 'order_sizing' in perf:
+            osa = perf['order_sizing']
+            if osa.get('total_trades', 0) > 0:
+                print(f"\n[ORDER_SIZE] ANALYSIS")
+                print(f"   Sizing strategy: {osa['sizing_strategy']}")
+                print(f"   Avg order size: {osa['avg_order_size']:.1f} shares")
+                print(f"   Order size range: {osa['min_order_size']}-{osa['max_order_size']}")
+                print(f"   Size efficiency: {osa['order_size_efficiency']:.3f}")
+                print(f"   Size adaptation: {osa['size_coefficient_of_variation']:.3f}")
         
         print("=" * 60)
         print("[SUCCESS] Enhanced market indicators successfully integrated!")

@@ -18,6 +18,80 @@ trading:
   shares_per_trade: 20
   market_impact: 0.005  # 0.5% market impact
   
+  # Technical Indicators Configuration
+  indicators:
+    # Moving Averages
+    sma_short: 20   # Short-term Simple Moving Average
+    sma_long: 50   # Long-term Simple Moving Average
+    
+    # RSI Configuration
+    rsi_period: 14
+    rsi_overbought: 70
+    rsi_oversold: 30
+    
+    # Other Technical Indicators
+    bollinger_period: 20
+    bollinger_std: 2
+    macd_fast: 12
+    macd_slow: 26
+    macd_signal: 9
+  
+  # Auto Order Size Management
+  order_sizing:
+    # Order sizing strategy: 'fixed', 'percentage', 'volatility_adjusted', 'kelly_criterion', 'risk_parity'
+    strategy: 'volatility_adjusted'
+    
+    # Fixed sizing (strategy: 'fixed')
+    fixed:
+      shares: 20
+    
+    # Percentage of portfolio (strategy: 'percentage')
+    percentage:
+      portfolio_pct: 0.05  # 5% of portfolio per trade
+      min_shares: 1
+      max_shares: 100
+    
+    # Volatility-adjusted sizing (strategy: 'volatility_adjusted')
+    volatility_adjusted:
+      base_shares: 20
+      volatility_window: 20  # Days to calculate volatility
+      volatility_target: 0.02  # 2% target volatility
+      min_shares: 5
+      max_shares: 200
+      adjustment_factor: 1.5  # Multiplier for volatility adjustment
+    
+    # Kelly Criterion sizing (strategy: 'kelly_criterion')
+    kelly_criterion:
+      base_portfolio_pct: 0.10  # 10% base allocation
+      win_rate: 0.55  # Estimated win rate
+      avg_win: 0.08   # Average win percentage
+      avg_loss: 0.06  # Average loss percentage
+      min_shares: 1
+      max_shares: 150
+      kelly_fraction: 0.25  # Fraction of Kelly to use (conservative)
+    
+    # Risk Parity sizing (strategy: 'risk_parity')
+    risk_parity:
+      portfolio_risk_budget: 0.15  # 15% portfolio risk per trade
+      lookback_days: 30
+      min_shares: 1
+      max_shares: 100
+    
+    # Dynamic sizing based on market conditions
+    market_conditions:
+      enabled: true
+      bull_market_multiplier: 1.2   # Increase size in bull markets
+      bear_market_multiplier: 0.7   # Decrease size in bear markets
+      high_vix_threshold: 25        # VIX threshold for high volatility
+      low_vix_threshold: 15         # VIX threshold for low volatility
+      vix_adjustment_factor: 0.1    # How much to adjust based on VIX
+    
+    # Position sizing limits
+    limits:
+      max_position_pct: 0.20        # Maximum 20% of portfolio in single position
+      max_daily_trades: 10          # Maximum trades per day
+      max_portfolio_heat: 0.50      # Maximum 50% of portfolio at risk
+  
   # Position tracking files (will be created as {symbol}.txt)
   position_file_extension: ".txt"
 

@@ -49,6 +49,86 @@ class ConfigManager:
         """Get number of shares per trade"""
         return self.config.get('trading', {}).get('shares_per_trade', 20)
     
+    def get_trading_config(self) -> Dict[str, Any]:
+        """Get complete trading configuration section"""
+        return self.config.get('trading', {})
+    
+    def get_market_impact(self) -> float:
+        """Get market impact factor"""
+        return self.config.get('trading', {}).get('market_impact', 0.005)
+    
+    # Order Sizing Configuration
+    def get_order_sizing_config(self) -> Dict[str, Any]:
+        """Get complete order sizing configuration"""
+        return self.config.get('trading', {}).get('order_sizing', {})
+    
+    def get_order_sizing_strategy(self) -> str:
+        """Get the order sizing strategy to use"""
+        return self.config.get('trading', {}).get('order_sizing', {}).get('strategy', 'fixed')
+    
+    def get_fixed_sizing_config(self) -> Dict[str, Any]:
+        """Get fixed sizing configuration"""
+        return self.config.get('trading', {}).get('order_sizing', {}).get('fixed', {'shares': 20})
+    
+    def get_percentage_sizing_config(self) -> Dict[str, Any]:
+        """Get percentage sizing configuration"""
+        return self.config.get('trading', {}).get('order_sizing', {}).get('percentage', {
+            'portfolio_pct': 0.05,
+            'min_shares': 1,
+            'max_shares': 100
+        })
+    
+    def get_volatility_adjusted_config(self) -> Dict[str, Any]:
+        """Get volatility-adjusted sizing configuration"""
+        return self.config.get('trading', {}).get('order_sizing', {}).get('volatility_adjusted', {
+            'base_shares': 20,
+            'volatility_window': 20,
+            'volatility_target': 0.02,
+            'min_shares': 5,
+            'max_shares': 200,
+            'adjustment_factor': 1.5
+        })
+    
+    def get_kelly_criterion_config(self) -> Dict[str, Any]:
+        """Get Kelly criterion sizing configuration"""
+        return self.config.get('trading', {}).get('order_sizing', {}).get('kelly_criterion', {
+            'base_portfolio_pct': 0.10,
+            'win_rate': 0.55,
+            'avg_win': 0.08,
+            'avg_loss': 0.06,
+            'min_shares': 1,
+            'max_shares': 150,
+            'kelly_fraction': 0.25
+        })
+    
+    def get_risk_parity_config(self) -> Dict[str, Any]:
+        """Get risk parity sizing configuration"""
+        return self.config.get('trading', {}).get('order_sizing', {}).get('risk_parity', {
+            'portfolio_risk_budget': 0.15,
+            'lookback_days': 30,
+            'min_shares': 1,
+            'max_shares': 100
+        })
+    
+    def get_market_conditions_config(self) -> Dict[str, Any]:
+        """Get market conditions adjustment configuration"""
+        return self.config.get('trading', {}).get('order_sizing', {}).get('market_conditions', {
+            'enabled': True,
+            'bull_market_multiplier': 1.2,
+            'bear_market_multiplier': 0.7,
+            'high_vix_threshold': 25,
+            'low_vix_threshold': 15,
+            'vix_adjustment_factor': 0.1
+        })
+    
+    def get_position_limits_config(self) -> Dict[str, Any]:
+        """Get position limits configuration"""
+        return self.config.get('trading', {}).get('order_sizing', {}).get('limits', {
+            'max_position_pct': 0.20,
+            'max_daily_trades': 10,
+            'max_portfolio_heat': 0.50
+        })
+    
     # Model Management Configuration
     def get_model_management_config(self) -> Dict[str, Any]:
         """Get model management configuration"""

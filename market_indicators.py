@@ -10,7 +10,7 @@ import datetime as dt
 from indicators import compute_indicators
 
 
-def get_market_data(symbols, start_date, end_date):
+def get_market_data(symbols, start_date, end_date, include_ohlc=False):
     """
     Get market data for multiple symbols including market indices
     
@@ -18,6 +18,7 @@ def get_market_data(symbols, start_date, end_date):
         symbols (list): List of symbols including target stock and market indices
         start_date (datetime): Start date for data
         end_date (datetime): End date for data
+        include_ohlc (bool): Whether to include full OHLC data for candlestick charts
     
     Returns:
         dict: Dictionary with stock data for each symbol
@@ -25,12 +26,31 @@ def get_market_data(symbols, start_date, end_date):
     data = {}
     for symbol in symbols:
         stock_df = yf.download(symbol, start=start_date, end=end_date, progress=False)
-        if isinstance(stock_df.columns, pd.MultiIndex):
-            adj_close = stock_df[('Close', symbol)]
+        
+        if include_ohlc and not stock_df.empty:
+            # Return full OHLC data for candlestick charts
+            if isinstance(stock_df.columns, pd.MultiIndex):
+                # Multi-level columns from yfinance
+                ohlc_data = pd.DataFrame({
+                    'Close': stock_df['Close'].iloc[:, 0] if len(stock_df['Close'].columns) > 0 else stock_df['Close'],
+                    'Open': stock_df['Open'].iloc[:, 0] if len(stock_df['Open'].columns) > 0 else stock_df['Open'],
+                    'High': stock_df['High'].iloc[:, 0] if len(stock_df['High'].columns) > 0 else stock_df['High'],
+                    'Low': stock_df['Low'].iloc[:, 0] if len(stock_df['Low'].columns) > 0 else stock_df['Low'],
+                    'Volume': stock_df['Volume'].iloc[:, 0] if len(stock_df['Volume'].columns) > 0 else stock_df['Volume']
+                })
+            else:
+                # Single-level columns
+                ohlc_data = stock_df[['Close', 'Open', 'High', 'Low', 'Volume']].copy()
+            
+            data[symbol] = ohlc_data
         else:
-            adj_close = stock_df['Close']
-        data[symbol] = adj_close.to_frame()
-        data[symbol].columns = [symbol]
+            # Return only close price for legacy compatibility
+            if isinstance(stock_df.columns, pd.MultiIndex):
+                adj_close = stock_df[('Close', symbol)] if ('Close', symbol) in stock_df.columns else stock_df['Close'].iloc[:, 0]
+            else:
+                adj_close = stock_df['Close']
+            data[symbol] = adj_close.to_frame()
+            data[symbol].columns = [symbol]
     
     return data
 
