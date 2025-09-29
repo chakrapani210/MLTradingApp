@@ -11,7 +11,7 @@ import warnings
 from dataclasses import dataclass
 from enum import Enum
 
-from ..interfaces.trading_strategy import TradingStrategy, TradingSignal
+from ..interfaces.trading_strategy import TradingStrategy, TradingSignal, Position, Order, OrderType
 from ..interfaces.signal_generator import SignalGenerator
 from ..interfaces.model_manager import ModelManagerInterface
 from ..interfaces.risk_manager import RiskManager
@@ -338,6 +338,29 @@ class GoldenCrossSignalGenerator(SignalGenerator):
                     signals.append(signal)
         
         return signals
+    
+    def get_required_columns(self) -> List[str]:
+        """Get required DataFrame columns for golden cross analysis"""
+        return ['close']  # Only need close prices for moving averages
+    
+    def validate_data(self, data: pd.DataFrame) -> bool:
+        """Validate that input data has required structure"""
+        required_columns = self.get_required_columns()
+        if not all(col in data.columns for col in required_columns):
+            return False
+        
+        # Check minimum data length
+        if len(data) < self.long_window:
+            return False
+            
+        # Check for valid numeric data
+        try:
+            for col in required_columns:
+                if not pd.api.types.is_numeric_dtype(data[col]):
+                    return False
+            return True
+        except Exception:
+            return False
 
 
 class ShortTermPatternSignalGenerator(SignalGenerator):
@@ -617,6 +640,30 @@ class ShortTermPatternSignalGenerator(SignalGenerator):
                     combined_signals.append(signal)
         
         return combined_signals
+    
+    def get_required_columns(self) -> List[str]:
+        """Get required DataFrame columns for short-term pattern analysis"""
+        return ['open', 'high', 'low', 'close']  # Need OHLC for RSI, BB, and candlestick patterns
+    
+    def validate_data(self, data: pd.DataFrame) -> bool:
+        """Validate that input data has required structure"""
+        required_columns = self.get_required_columns()
+        if not all(col in data.columns for col in required_columns):
+            return False
+        
+        # Check minimum data length
+        min_length = max(self.rsi_period, self.bb_period)
+        if len(data) < min_length:
+            return False
+            
+        # Check for valid numeric data
+        try:
+            for col in required_columns:
+                if not pd.api.types.is_numeric_dtype(data[col]):
+                    return False
+            return True
+        except Exception:
+            return False
 
 
 class EnhancedMLTradingStrategy(TradingStrategy):
@@ -652,7 +699,16 @@ class EnhancedMLTradingStrategy(TradingStrategy):
             short_term_config: Short-term pattern configuration
             starting_portfolio_value: Starting portfolio value
         """
-        super().__init__()
+        super().__init__(
+            name=f"EnhancedMLTradingStrategy_{symbol}",
+            config={
+                'symbol': symbol,
+                'order_sizing_strategy': order_sizing_config.strategy.value if order_sizing_config else 'percentage',
+                'starting_portfolio_value': starting_portfolio_value,
+                'golden_cross_config': golden_cross_config,
+                'short_term_config': short_term_config
+            }
+        )
         
         self.symbol = symbol
         self.data_provider = data_provider
@@ -920,3 +976,85 @@ class EnhancedMLTradingStrategy(TradingStrategy):
             'current_position': self.order_size_manager.get_current_position(self.symbol),
             'trade_history': self.trade_history[-10:]  # Last 10 trades
         }
+    
+    # Abstract method implementations required by TradingStrategy interface
+    def generate_orders(self, signals: List[TradingSignal], 
+                       market_data: pd.DataFrame,
+                       positions: Dict[str, Position]) -> List[Order]:
+        """Generate orders based on trading signals"""
+        orders = []
+        
+        for signal in signals:
+            if signal.direction == 0:  # HOLD signal
+                continue
+                
+            # Get current price
+            current_price = float(market_data.iloc[-1]['close'])
+            
+            # Get current position for this symbol
+            current_position = positions.get(signal.symbol)
+            
+            # Calculate position size
+            account_value = self.starting_portfolio_value  # Simplified
+            position_size = self.calculate_position_size(
+                signal, current_price, account_value, current_position
+            )
+            
+            if abs(position_size) >= 1:  # Only create order if size is meaningful
+                order = Order(
+                    symbol=signal.symbol,
+                    order_type=OrderType.MARKET,
+                    side='BUY' if signal.direction > 0 else 'SELL',
+                    quantity=abs(position_size),
+                    price=current_price,
+                    timestamp=signal.timestamp,
+                    metadata={
+                        'signal_type': signal.signal_type,
+                        'confidence': signal.confidence,
+                        'order_sizing_strategy': self.order_sizing_config.strategy.value
+                    }
+                )
+                orders.append(order)
+        
+        return orders
+    
+    def calculate_position_size(self, signal: TradingSignal, 
+                               current_price: float,
+                               account_value: float,
+                               current_position: Optional[Position] = None) -> int:
+        """Calculate position size for a trade"""
+        # Use the order size manager for intelligent sizing
+        return self.order_size_manager.calculate_order_size(
+            symbol=signal.symbol,
+            signal=signal,
+            stock_data=pd.DataFrame({'close': [current_price]})  # Simplified data
+        )
+    
+    def validate_order(self, order, 
+                      market_data: pd.DataFrame,
+                      positions: Dict[str, Position],
+                      account_value: float) -> bool:
+        """Validate an order before execution"""
+        # Basic validation checks
+        
+        # Check if we have valid price data
+        if market_data is None or market_data.empty:
+            return False
+            
+        # Check order quantity is positive
+        if not hasattr(order, 'quantity') or order.quantity <= 0:
+            return False
+            
+        # Check if we have enough account value for buy orders
+        if hasattr(order, 'side') and order.side == 'BUY':
+            order_value = order.quantity * order.price
+            if order_value > account_value * 0.95:  # Don't use more than 95% of account
+                return False
+        
+        # Check if we have enough shares for sell orders
+        if hasattr(order, 'side') and order.side == 'SELL':
+            current_position = positions.get(order.symbol)
+            if current_position is None or current_position.quantity < order.quantity:
+                return False
+        
+        return True

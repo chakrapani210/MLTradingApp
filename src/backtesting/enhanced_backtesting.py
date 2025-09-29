@@ -405,6 +405,67 @@ class EnhancedBacktester(Backtester):
         
         return result
     
+    # Abstract method implementations required by Backtester interface
+    def simulate_order_execution(self, order, market_data: pd.DataFrame, 
+                               timestamp: pd.Timestamp) -> Dict[str, Any]:
+        """Simulate order execution with realistic constraints"""
+        # Get current price from market data
+        if timestamp in market_data.index:
+            current_price = market_data.loc[timestamp, 'close']
+        else:
+            # Use the closest available price
+            closest_idx = market_data.index.get_indexer([timestamp], method='nearest')[0]
+            current_price = market_data.iloc[closest_idx]['close']
+        
+        # Apply slippage
+        if hasattr(order, 'side') and order.side == OrderSide.BUY:
+            fill_price = current_price * (1 + self.slippage_rate)
+        else:
+            fill_price = current_price * (1 - self.slippage_rate)
+        
+        # Calculate commission
+        commission = abs(order.quantity * fill_price * self.commission_rate)
+        
+        return {
+            'fill_price': fill_price,
+            'fill_quantity': order.quantity,
+            'commission': commission,
+            'execution_timestamp': timestamp,
+            'market_price': current_price
+        }
+    
+    def calculate_portfolio_value(self, positions: Dict[str, Any], cash: float,
+                                market_data: Dict[str, pd.DataFrame], 
+                                timestamp: pd.Timestamp) -> float:
+        """Calculate total portfolio value"""
+        total_value = cash
+        
+        for symbol, position in positions.items():
+            if symbol in market_data and hasattr(position, 'quantity') and position.quantity != 0:
+                symbol_data = market_data[symbol]
+                if timestamp in symbol_data.index:
+                    current_price = symbol_data.loc[timestamp, 'close']
+                else:
+                    # Use closest available price
+                    closest_idx = symbol_data.index.get_indexer([timestamp], method='nearest')[0]
+                    current_price = symbol_data.iloc[closest_idx]['close']
+                
+                total_value += position.quantity * current_price
+        
+        return total_value
+    
+    def calculate_performance_metrics(self, portfolio_values: pd.Series, 
+                                    benchmark_data: Optional[pd.Series] = None):
+        """Calculate performance metrics from portfolio values"""
+        # Convert to equity curve format expected by _calculate_performance_metrics
+        equity_curve = [(timestamp, value) for timestamp, value in portfolio_values.items()]
+        
+        # Use existing private method
+        return self._calculate_performance_metrics(
+            equity_curve=equity_curve,
+            benchmark_data=benchmark_data
+        )
+    
     def _execute_strategy_signal(self, symbol: str, signal: TradingSignal, 
                                data: pd.DataFrame) -> Optional[Dict[str, Any]]:
         """Execute trading signal through strategy"""
