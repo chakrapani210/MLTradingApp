@@ -31,6 +31,16 @@ class TradingSignal:
     source: str       # Source of the signal (e.g., 'RSI', 'ML_Model', 'GoldenCross')
     metadata: Dict[str, Any] = None  # Additional signal-specific data
     
+    @property
+    def direction(self) -> int:
+        """Convert signal_type to direction for backward compatibility"""
+        if self.signal_type == SignalType.BUY:
+            return 1
+        elif self.signal_type == SignalType.SELL:
+            return -1
+        else:  # HOLD
+            return 0
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert signal to dictionary format"""
         return {

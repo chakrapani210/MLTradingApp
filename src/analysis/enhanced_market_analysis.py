@@ -14,6 +14,15 @@ from sklearn.preprocessing import StandardScaler
 
 from ..interfaces.data_provider import DataProvider
 from ..data.providers import YFinanceProvider
+import sys
+import os
+
+# Add project root to path for config_manager import
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from config_manager import get_config_manager
 
 warnings.filterwarnings('ignore')
 
@@ -63,7 +72,7 @@ class MarketContextAnalyzer:
     def __init__(self, data_provider: DataProvider):
         """Initialize Market Context Analyzer"""
         self.data_provider = data_provider
-        self.market_etfs = ['SPY', 'QQQ', 'IWM', 'VIX']  # Core market indicators
+        self.market_etfs = ['SPY', 'QQQ', 'IWM', '^VIX']  # Core market indicators
         self.sector_etfs = {
             'Technology': 'XLK',
             'Healthcare': 'XLV', 
@@ -99,7 +108,7 @@ class MarketContextAnalyzer:
         
         # Get market data
         symbols_to_fetch = [symbol] + self.market_etfs + list(self.sector_etfs.values())
-        market_data = self.data_provider.get_historical_data(
+        market_data = self.data_provider.get_market_data(
             symbols=symbols_to_fetch,
             start_date=start_date,
             end_date=end_date
@@ -155,11 +164,22 @@ class MarketContextAnalyzer:
                                window: int) -> Dict[str, float]:
         """Calculate rolling correlations with market indices"""
         correlations = {}
-        symbol_returns = symbol_data.pct_change().dropna()
+        
+        # Access close price if symbol_data is a DataFrame
+        if hasattr(symbol_data, 'columns') and 'close' in symbol_data.columns:
+            symbol_price_data = symbol_data['close']
+        else:
+            symbol_price_data = symbol_data
+        symbol_returns = symbol_price_data.pct_change().dropna()
         
         for etf, etf_data in market_data.items():
             if etf_data is not None and len(etf_data) > window:
-                etf_returns = etf_data.pct_change().dropna()
+                # Access close price if etf_data is a DataFrame
+                if hasattr(etf_data, 'columns') and 'close' in etf_data.columns:
+                    etf_price_data = etf_data['close']
+                else:
+                    etf_price_data = etf_data
+                etf_returns = etf_price_data.pct_change().dropna()
                 
                 # Align data
                 aligned_symbol, aligned_etf = symbol_returns.align(etf_returns, join='inner')
@@ -176,8 +196,12 @@ class MarketContextAnalyzer:
         if market_data is None or len(market_data) < 30:
             return 0.0
         
-        symbol_returns = symbol_data.pct_change().dropna()
-        market_returns = market_data.pct_change().dropna()
+        # Use close prices
+        if 'close' not in symbol_data.columns or 'close' not in market_data.columns:
+            return 0.0
+            
+        symbol_returns = symbol_data['close'].pct_change().dropna()
+        market_returns = market_data['close'].pct_change().dropna()
         
         # Align data
         aligned_symbol, aligned_market = symbol_returns.align(market_returns, join='inner')
@@ -200,15 +224,21 @@ class MarketContextAnalyzer:
         if spy_data is None or len(spy_data) < window:
             return 'unknown'
         
+        # Use close price for calculations
+        if 'close' not in spy_data.columns:
+            return 'unknown'
+            
+        spy_close = spy_data['close']
+        
         # Calculate trend indicators
-        sma_short = spy_data.rolling(window//3).mean()
-        sma_long = spy_data.rolling(window).mean()
+        sma_short = spy_close.rolling(window//3).mean()
+        sma_long = spy_close.rolling(window).mean()
         
         # Recent trend direction
         recent_trend = (sma_short.iloc[-1] - sma_long.iloc[-1]) / sma_long.iloc[-1]
         
         # Volatility
-        returns = spy_data.pct_change().dropna()
+        returns = spy_close.pct_change().dropna()
         recent_vol = returns.tail(window).std()
         
         # Market regime classification
@@ -247,9 +277,10 @@ class MarketContextAnalyzer:
         for sector_name, etf_symbol in self.sector_etfs.items():
             if etf_symbol in market_data and market_data[etf_symbol] is not None:
                 etf_data = market_data[etf_symbol]
-                if len(etf_data) >= window:
-                    # Calculate recent performance
-                    recent_return = (etf_data.iloc[-1] - etf_data.iloc[-window]) / etf_data.iloc[-window]
+                if len(etf_data) >= window and 'close' in etf_data.columns:
+                    # Calculate recent performance using close prices
+                    etf_close = etf_data['close']
+                    recent_return = (etf_close.iloc[-1] - etf_close.iloc[-window]) / etf_close.iloc[-window]
                     sector_strength[sector_name] = float(recent_return)
         
         return sector_strength
@@ -260,31 +291,43 @@ class MarketContextAnalyzer:
         indicators = {}
         
         # VIX analysis (fear index)
-        if 'VIX' in market_data and market_data['VIX'] is not None:
-            vix_data = market_data['VIX']
+        if '^VIX' in market_data and market_data['^VIX'] is not None:
+            vix_data = market_data['^VIX']
             if len(vix_data) >= window:
-                indicators['vix_level'] = float(vix_data.iloc[-1])
-                indicators['vix_percentile'] = float(
-                    (vix_data.tail(window*3) < vix_data.iloc[-1]).sum() / len(vix_data.tail(window*3))
-                )
+                # Use close price for VIX
+                if 'close' in vix_data.columns:
+                    vix_close = vix_data['close']
+                    indicators['vix_level'] = float(vix_close.iloc[-1])
+                    vix_window_data = vix_close.tail(window*3)
+                    indicators['vix_percentile'] = float(
+                        (vix_window_data < vix_close.iloc[-1]).sum() / len(vix_window_data)
+                    )
         
         # Market breadth (using IWM vs SPY)
         if 'IWM' in market_data and 'SPY' in market_data:
             iwm_data = market_data['IWM']
             spy_data = market_data['SPY']
             if iwm_data is not None and spy_data is not None and len(iwm_data) >= window:
-                iwm_return = (iwm_data.iloc[-1] - iwm_data.iloc[-window]) / iwm_data.iloc[-window]
-                spy_return = (spy_data.iloc[-1] - spy_data.iloc[-window]) / spy_data.iloc[-window]
-                indicators['market_breadth'] = float(iwm_return - spy_return)
+                # Use close prices for calculations
+                if 'close' in iwm_data.columns and 'close' in spy_data.columns:
+                    iwm_close = iwm_data['close']
+                    spy_close = spy_data['close']
+                    iwm_return = (iwm_close.iloc[-1] - iwm_close.iloc[-window]) / iwm_close.iloc[-window]
+                    spy_return = (spy_close.iloc[-1] - spy_close.iloc[-window]) / spy_close.iloc[-window]
+                    indicators['market_breadth'] = float(iwm_return - spy_return)
         
         # Tech vs Market (QQQ vs SPY)
         if 'QQQ' in market_data and 'SPY' in market_data:
             qqq_data = market_data['QQQ']
             spy_data = market_data['SPY']
             if qqq_data is not None and spy_data is not None and len(qqq_data) >= window:
-                qqq_return = (qqq_data.iloc[-1] - qqq_data.iloc[-window]) / qqq_data.iloc[-window]
-                spy_return = (spy_data.iloc[-1] - spy_data.iloc[-window]) / spy_data.iloc[-window]
-                indicators['tech_leadership'] = float(qqq_return - spy_return)
+                # Use close prices for calculations
+                if 'close' in qqq_data.columns and 'close' in spy_data.columns:
+                    qqq_close = qqq_data['close']
+                    spy_close = spy_data['close']
+                    qqq_return = (qqq_close.iloc[-1] - qqq_close.iloc[-window]) / qqq_close.iloc[-window]
+                    spy_return = (spy_close.iloc[-1] - spy_close.iloc[-window]) / spy_close.iloc[-window]
+                    indicators['tech_leadership'] = float(qqq_return - spy_return)
         
         return indicators
 
@@ -333,9 +376,9 @@ class EnhancedFeatureEngineer:
         # Get price data
         symbols_for_features = [symbol]
         if include_market_context:
-            symbols_for_features.extend(['SPY', 'QQQ', 'VIX'])
+            symbols_for_features.extend(['SPY', 'QQQ', '^VIX'])
         
-        data = self.market_analyzer.data_provider.get_historical_data(
+        data = self.market_analyzer.data_provider.get_market_data(
             symbols=symbols_for_features,
             start_date=start_date,
             end_date=end_date
@@ -432,7 +475,7 @@ class EnhancedFeatureEngineer:
             return np.array([]).reshape(len(data), 0), []
     
     def _calculate_talib_features(self, price_data: np.ndarray, index: pd.DatetimeIndex) -> Dict[str, np.ndarray]:
-        """Calculate features using TA-Lib"""
+        """Calculate features using TA-Lib with centralized configuration"""
         features = {}
         
         # Ensure we have enough data
@@ -440,28 +483,37 @@ class EnhancedFeatureEngineer:
             return features
         
         try:
+            # Get centralized configuration
+            config_manager = get_config_manager()
+            tech_config = config_manager.get_technical_indicators_config()
+            
             # Trend Indicators
-            features['SMA_10'] = talib.SMA(price_data, timeperiod=10)
-            features['SMA_20'] = talib.SMA(price_data, timeperiod=20) 
-            features['SMA_50'] = talib.SMA(price_data, timeperiod=50)
-            features['EMA_12'] = talib.EMA(price_data, timeperiod=12)
-            features['EMA_26'] = talib.EMA(price_data, timeperiod=26)
+            features['SMA_10'] = talib.SMA(price_data, timeperiod=tech_config.get('sma_periods', [10])[0] if isinstance(tech_config.get('sma_periods', [10]), list) else 10)
+            features['SMA_20'] = talib.SMA(price_data, timeperiod=tech_config.get('sma_short_period', 20))
+            features['SMA_50'] = talib.SMA(price_data, timeperiod=tech_config.get('sma_long_period', 50))
+            features['EMA_12'] = talib.EMA(price_data, timeperiod=tech_config.get('ema_short_period', 12))
+            features['EMA_26'] = talib.EMA(price_data, timeperiod=tech_config.get('ema_long_period', 26))
             
             # Momentum Indicators
-            features['RSI'] = talib.RSI(price_data, timeperiod=14)
-            features['MOM'] = talib.MOM(price_data, timeperiod=10)
-            features['ROC'] = talib.ROC(price_data, timeperiod=10)
-            features['CCI'] = talib.CCI(price_data, price_data, price_data, timeperiod=14)
-            features['WILLR'] = talib.WILLR(price_data, price_data, price_data, timeperiod=14)
+            features['RSI'] = talib.RSI(price_data, timeperiod=tech_config.get('rsi_period', 14))
+            features['MOM'] = talib.MOM(price_data, timeperiod=tech_config.get('momentum_periods', [10])[0] if isinstance(tech_config.get('momentum_periods', [10]), list) else 10)
+            features['ROC'] = talib.ROC(price_data, timeperiod=tech_config.get('roc_period', 10))
+            features['CCI'] = talib.CCI(price_data, price_data, price_data, timeperiod=tech_config.get('cci_period', 14))
+            features['WILLR'] = talib.WILLR(price_data, price_data, price_data, timeperiod=tech_config.get('williams_r_period', 14))
             
             # MACD
-            macd, macdsignal, macdhist = talib.MACD(price_data, fastperiod=12, slowperiod=26, signalperiod=9)
+            macd_fast = tech_config.get('macd_fast_period', 12)
+            macd_slow = tech_config.get('macd_slow_period', 26)
+            macd_signal = tech_config.get('macd_signal_period', 9)
+            macd, macdsignal, macdhist = talib.MACD(price_data, fastperiod=macd_fast, slowperiod=macd_slow, signalperiod=macd_signal)
             features['MACD'] = macd
             features['MACD_SIGNAL'] = macdsignal
             features['MACD_HIST'] = macdhist
             
             # Bollinger Bands
-            bb_upper, bb_middle, bb_lower = talib.BBANDS(price_data, timeperiod=20, nbdevup=2, nbdevdn=2)
+            bb_period = tech_config.get('bollinger_bands_period', 20)
+            bb_std_dev = tech_config.get('bollinger_bands_std_dev', 2)
+            bb_upper, bb_middle, bb_lower = talib.BBANDS(price_data, timeperiod=bb_period, nbdevup=bb_std_dev, nbdevdn=bb_std_dev)
             features['BB_UPPER'] = bb_upper
             features['BB_MIDDLE'] = bb_middle
             features['BB_LOWER'] = bb_lower
@@ -469,12 +521,16 @@ class EnhancedFeatureEngineer:
             features['BB_POSITION'] = (price_data - bb_lower) / (bb_upper - bb_lower)
             
             # Volatility Indicators
-            features['ATR'] = talib.ATR(price_data, price_data, price_data, timeperiod=14)
+            atr_period = tech_config.get('atr_period', 14)
+            features['ATR'] = talib.ATR(price_data, price_data, price_data, timeperiod=atr_period)
             
             # Overlap Studies
-            features['DEMA'] = talib.DEMA(price_data, timeperiod=30)
-            features['TEMA'] = talib.TEMA(price_data, timeperiod=30)
-            features['TRIMA'] = talib.TRIMA(price_data, timeperiod=30)
+            dema_period = tech_config.get('dema_period', 30)
+            tema_period = tech_config.get('tema_period', 30)
+            trima_period = tech_config.get('trima_period', 30)
+            features['DEMA'] = talib.DEMA(price_data, timeperiod=dema_period)
+            features['TEMA'] = talib.TEMA(price_data, timeperiod=tema_period)
+            features['TRIMA'] = talib.TRIMA(price_data, timeperiod=trima_period)
             
             # Pattern Recognition (comprehensive set matching original enhanced_strategy.py)
             features['CDL_DOJI'] = talib.CDLDOJI(price_data, price_data, price_data, price_data).astype(float)
@@ -554,10 +610,17 @@ class EnhancedFeatureEngineer:
             feature_names.extend(['QQQ_CORRELATION', 'QQQ_BETA'])
         
         # VIX features
-        if 'VIX' in all_data and all_data['VIX'] is not None:
-            vix_data = all_data['VIX']
-            vix_level = vix_data.values
-            vix_change = vix_data.pct_change().fillna(0).values
+        if '^VIX' in all_data and all_data['^VIX'] is not None:
+            vix_data = all_data['^VIX']
+            # Access close price properly
+            if hasattr(vix_data, 'columns') and 'close' in vix_data.columns:
+                vix_close = vix_data['close']
+            else:
+                vix_close = vix_data
+            
+            # Ensure proper length alignment
+            vix_level = self._align_series_to_data(vix_close, symbol_data)
+            vix_change = self._align_series_to_data(vix_close.pct_change().fillna(0), symbol_data)
             
             features.extend([vix_level, vix_change])
             feature_names.extend(['VIX_LEVEL', 'VIX_CHANGE'])
@@ -570,8 +633,19 @@ class EnhancedFeatureEngineer:
     def _calculate_rolling_correlation(self, data1: pd.DataFrame, data2: pd.DataFrame, 
                                      window: int) -> np.ndarray:
         """Calculate rolling correlation between two time series"""
-        returns1 = data1.pct_change()
-        returns2 = data2.pct_change()
+        # Extract close prices
+        if hasattr(data1, 'columns') and 'close' in data1.columns:
+            price1 = data1['close']
+        else:
+            price1 = data1
+            
+        if hasattr(data2, 'columns') and 'close' in data2.columns:
+            price2 = data2['close']
+        else:
+            price2 = data2
+            
+        returns1 = price1.pct_change()
+        returns2 = price2.pct_change()
         
         # Align data
         aligned1, aligned2 = returns1.align(returns2, join='inner')
@@ -589,8 +663,19 @@ class EnhancedFeatureEngineer:
     def _calculate_rolling_beta(self, data1: pd.DataFrame, data2: pd.DataFrame, 
                               window: int) -> np.ndarray:
         """Calculate rolling beta between two time series"""
-        returns1 = data1.pct_change()
-        returns2 = data2.pct_change()
+        # Extract close prices
+        if hasattr(data1, 'columns') and 'close' in data1.columns:
+            price1 = data1['close']
+        else:
+            price1 = data1
+            
+        if hasattr(data2, 'columns') and 'close' in data2.columns:
+            price2 = data2['close']
+        else:
+            price2 = data2
+            
+        returns1 = price1.pct_change()
+        returns2 = price2.pct_change()
         
         # Align data
         aligned1, aligned2 = returns1.align(returns2, join='inner')
@@ -639,3 +724,18 @@ class EnhancedFeatureEngineer:
                 labels[i] = 0  # HOLD
         
         return labels
+    
+    def _align_series_to_data(self, series: pd.Series, target_data: pd.DataFrame) -> np.ndarray:
+        """Align a series to match the length of target data"""
+        target_length = len(target_data)
+        
+        if len(series) == target_length:
+            return series.values
+        elif len(series) > target_length:
+            # Take the last N values to match target length
+            return series.tail(target_length).values
+        else:
+            # Pad with NaN if series is shorter
+            result = np.full(target_length, np.nan)
+            result[-len(series):] = series.values
+            return result

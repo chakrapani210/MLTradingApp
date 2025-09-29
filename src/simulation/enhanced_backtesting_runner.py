@@ -83,40 +83,40 @@ class EnhancedBacktestingRunner:
                 'backtest_period': f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}",
                 'strategy_type': type(strategy).__name__,
                 'performance': {
-                    'total_return': backtest_result.total_return,
-                    'annualized_return': backtest_result.performance_metrics.annualized_return,
-                    'sharpe_ratio': backtest_result.sharpe_ratio,
-                    'max_drawdown': backtest_result.max_drawdown,
-                    'volatility': backtest_result.performance_metrics.volatility,
-                    'alpha': backtest_result.performance_metrics.alpha,
-                    'beta': backtest_result.performance_metrics.beta
+                    'total_return': backtest_result.performance.total_return,
+                    'annualized_return': backtest_result.performance.annualized_return,
+                    'sharpe_ratio': backtest_result.performance.sharpe_ratio,
+                    'max_drawdown': backtest_result.performance.max_drawdown,
+                    'volatility': backtest_result.performance.volatility,
+                    'alpha': None,  # Not available in StrategyPerformance
+                    'beta': None   # Not available in StrategyPerformance
                 },
                 'trading_metrics': {
-                    'total_trades': backtest_result.performance_metrics.total_trades,
-                    'win_rate': backtest_result.performance_metrics.win_rate,
-                    'profit_factor': backtest_result.performance_metrics.profit_factor,
-                    'avg_win': backtest_result.performance_metrics.avg_win,
-                    'avg_loss': backtest_result.performance_metrics.avg_loss
+                    'total_trades': backtest_result.performance.total_trades,
+                    'win_rate': backtest_result.performance.win_rate,
+                    'profit_factor': backtest_result.performance.profit_factor,
+                    'avg_win': backtest_result.performance.avg_win,
+                    'avg_loss': backtest_result.performance.avg_loss
                 },
                 'risk_metrics': {
-                    'sortino_ratio': backtest_result.performance_metrics.sortino_ratio,
-                    'calmar_ratio': backtest_result.performance_metrics.calmar_ratio,
-                    'value_at_risk': backtest_result.performance_metrics.value_at_risk,
-                    'information_ratio': backtest_result.performance_metrics.information_ratio
+                    'sortino_ratio': None,  # Not available in StrategyPerformance
+                    'calmar_ratio': None,   # Not available in StrategyPerformance
+                    'value_at_risk': None,  # Not available in StrategyPerformance
+                    'information_ratio': None  # Not available in StrategyPerformance
                 },
                 'benchmark_comparison': {
                     'benchmark_symbol': benchmark_symbol,
-                    'benchmark_return': backtest_result.performance_metrics.benchmark_return,
-                    'outperformance': backtest_result.total_return - backtest_result.performance_metrics.benchmark_return
+                    'benchmark_return': None,  # Not available in StrategyPerformance
+                    'outperformance': None     # Cannot calculate without benchmark_return
                 },
                 'order_sizing_analysis': self._analyze_order_sizing_performance(strategy),
                 'signal_analysis': self._analyze_signal_performance(backtest_result)
             }
             
             print(f"[BACKTEST] Backtest completed for {symbol}")
-            print(f"           Total Return: {backtest_result.total_return:.1%}")
-            print(f"           Sharpe Ratio: {backtest_result.sharpe_ratio:.3f}")
-            print(f"           Total Trades: {backtest_result.performance_metrics.total_trades}")
+            print(f"           Total Return: {backtest_result.performance.total_return:.1%}")
+            print(f"           Sharpe Ratio: {backtest_result.performance.sharpe_ratio:.3f}")
+            print(f"           Total Trades: {backtest_result.performance.total_trades}")
             
             # Store in backtest history
             self.backtest_history[f"{symbol}_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}"] = comprehensive_results
@@ -243,36 +243,31 @@ class EnhancedBacktestingRunner:
     
     def _analyze_signal_performance(self, backtest_result) -> Dict[str, Any]:
         """Analyze signal generation performance"""
-        signal_history = backtest_result.additional_metrics.get('signal_history', [])
+        # BacktestResults doesn't have additional_metrics - use available data instead
+        # We can analyze trades to infer signal performance
         
-        if not signal_history:
-            return {'no_signals': True}
+        if not backtest_result.trades:
+            return {
+                'no_signals': True,
+                'total_signals': 0,
+                'signal_types': {},
+                'avg_signal_success': 0.0
+            }
         
-        signal_types = {}
-        for signal in signal_history:
-            sig_type = signal['signal_type']
-            if sig_type not in signal_types:
-                signal_types[sig_type] = {'count': 0, 'avg_confidence': 0, 'directions': []}
-            
-            signal_types[sig_type]['count'] += 1
-            signal_types[sig_type]['avg_confidence'] += signal['confidence']
-            signal_types[sig_type]['directions'].append(signal['signal'])
-        
-        # Calculate averages
-        for sig_type in signal_types:
-            count = signal_types[sig_type]['count']
-            signal_types[sig_type]['avg_confidence'] /= count
-            directions = signal_types[sig_type]['directions']
-            signal_types[sig_type]['buy_ratio'] = sum(1 for d in directions if d > 0) / count
+        # Analyze trades to estimate signal performance
+        total_trades = len(backtest_result.trades)
+        profitable_trades = sum(1 for trade in backtest_result.trades 
+                               if hasattr(trade, 'profit') and trade.profit > 0)
         
         return {
-            'total_signals': len(signal_history),
-            'signal_types': signal_types,
-            'avg_confidence': np.mean([s['confidence'] for s in signal_history]),
-            'signal_distribution': {
-                'buy_signals': sum(1 for s in signal_history if s['signal'] > 0),
-                'sell_signals': sum(1 for s in signal_history if s['signal'] < 0)
-            }
+            'total_signals': total_trades,  # Approximation
+            'signal_types': {
+                'trading_signals': {
+                    'count': total_trades,
+                    'success_rate': profitable_trades / total_trades if total_trades > 0 else 0
+                }
+            },
+            'avg_signal_success': profitable_trades / total_trades if total_trades > 0 else 0.0
         }
     
     def _analyze_period_performance(self, period_results: Dict[str, Any]) -> Dict[str, Any]:

@@ -9,35 +9,72 @@ import numpy as np
 from typing import Dict, List, Optional, Any
 import warnings
 import os
+import sys
+
+# Add src directory to path for absolute imports
+src_path = os.path.dirname(os.path.abspath(__file__))
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
 
 # Core interfaces
-from .interfaces.data_provider import DataProvider
-from .interfaces.signal_generator import SignalGenerator
-from .interfaces.trading_strategy import TradingStrategy, TradingSignal
-from .interfaces.model_manager import ModelManagerInterface
-from .interfaces.risk_manager import RiskManager
-from .interfaces.backtester import Backtester
+try:
+    from .interfaces.data_provider import DataProvider
+    from .interfaces.signal_generator import SignalGenerator
+    from .interfaces.trading_strategy import TradingStrategy, TradingSignal
+    from .interfaces.model_manager import ModelManagerInterface
+    from .interfaces.risk_manager import RiskManager
+    from .interfaces.backtester import Backtester
+except ImportError:
+    # Fallback to absolute imports
+    from interfaces.data_provider import DataProvider
+    from interfaces.signal_generator import SignalGenerator
+    from interfaces.trading_strategy import TradingStrategy, TradingSignal
+    from interfaces.model_manager import ModelManagerInterface
+    from interfaces.risk_manager import RiskManager
+    from interfaces.backtester import Backtester
 
 # Enhanced implementations
-from .data.providers import YFinanceProvider
-from .data.preprocessors import DataPreprocessor, TechnicalIndicatorCalculator
-from .trading.enhanced_strategies import (
-    EnhancedMLTradingStrategy, 
-    AutoOrderSizeManager, 
-    OrderSizingConfig, 
-    OrderSizingStrategy
-)
-from .models.enhanced_model_management import (
-    EnhancedModelManager, 
-    MLSignalGenerator, 
-    ModelTrainingService
-)
-from .analysis.enhanced_market_analysis import (
-    MarketContextAnalyzer, 
-    EnhancedFeatureEngineer
-)
-from .backtesting.enhanced_backtesting import EnhancedBacktester
-from .signals.technical import RSISignalGenerator, MACDSignalGenerator, BollingerBandsSignalGenerator
+try:
+    from .data.providers import YFinanceProvider
+    from .data.preprocessors import DataPreprocessor, TechnicalIndicatorCalculator
+    from .trading.enhanced_strategies import (
+        EnhancedMLTradingStrategy, 
+        AutoOrderSizeManager, 
+        OrderSizingConfig, 
+        OrderSizingStrategy
+    )
+    from .models.enhanced_model_management import (
+        EnhancedModelManager, 
+        MLSignalGenerator, 
+        ModelTrainingService
+    )
+    from .analysis.enhanced_market_analysis import (
+        MarketContextAnalyzer, 
+        EnhancedFeatureEngineer
+    )
+    from .backtesting.enhanced_backtesting import EnhancedBacktester
+    from .signals.technical import RSISignalGenerator, MACDSignalGenerator, BollingerBandsSignalGenerator
+except ImportError:
+    # Fallback to absolute imports
+    from data.providers import YFinanceProvider
+    from data.preprocessors import DataPreprocessor, TechnicalIndicatorCalculator
+    from trading.enhanced_strategies import (
+        EnhancedMLTradingStrategy, 
+        AutoOrderSizeManager, 
+        OrderSizingConfig, 
+        OrderSizingStrategy
+    )
+    from models.enhanced_model_management import (
+        EnhancedModelManager, 
+        MLSignalGenerator, 
+        ModelTrainingService
+    )
+    from analysis.enhanced_market_analysis import (
+        MarketContextAnalyzer, 
+        EnhancedFeatureEngineer
+    )
+    from backtesting.enhanced_backtesting import EnhancedBacktester
+    from signals.technical import RSISignalGenerator, MACDSignalGenerator, BollingerBandsSignalGenerator
 
 warnings.filterwarnings('ignore')
 
@@ -201,6 +238,49 @@ class ProductionTradingOrchestrator:
             'bb_std': strategy_configs.get('bb_std', 2.0)
         }
         
+        # Create comprehensive technical analysis configuration
+        technical_config = {
+            'rsi': {
+                'enabled': strategy_configs.get('rsi_enabled', True),
+                'period': strategy_configs.get('rsi_period', 14),
+                'oversold_threshold': strategy_configs.get('rsi_oversold', 30),
+                'overbought_threshold': strategy_configs.get('rsi_overbought', 70)
+            },
+            'macd': {
+                'enabled': strategy_configs.get('macd_enabled', True),
+                'fast_period': strategy_configs.get('macd_fast', 12),
+                'slow_period': strategy_configs.get('macd_slow', 26),
+                'signal_period': strategy_configs.get('macd_signal', 9)
+            },
+            'bollinger_bands': {
+                'enabled': strategy_configs.get('bb_enabled', True),
+                'period': strategy_configs.get('bb_period', 20),
+                'std_dev': strategy_configs.get('bb_std', 2.0)
+            },
+            'sma_crossover': {
+                'enabled': strategy_configs.get('sma_crossover_enabled', True),
+                'short_period': strategy_configs.get('sma_short_period', 20),
+                'long_period': strategy_configs.get('sma_long_period', 50),
+                'signal_strength_threshold': strategy_configs.get('sma_strength_threshold', 0.5),
+                'confirmation_periods': strategy_configs.get('sma_confirmation_periods', 2)
+            },
+            'ema': {
+                'enabled': strategy_configs.get('ema_enabled', True),
+                'periods': strategy_configs.get('ema_periods', [12, 26]),
+                'crossover_pairs': strategy_configs.get('ema_crossover_pairs', [(12, 26)]),
+                'slope_threshold': strategy_configs.get('ema_slope_threshold', 0.001),
+                'min_confidence': strategy_configs.get('ema_min_confidence', 0.3)
+            },
+            'volume_analysis': {
+                'enabled': strategy_configs.get('volume_analysis_enabled', True),
+                'volume_surge_threshold': strategy_configs.get('volume_surge_threshold', 2.0),
+                'volume_sma_period': strategy_configs.get('volume_sma_period', 20),
+                'obv_period': strategy_configs.get('obv_period', 10),
+                'price_volume_confirmation': strategy_configs.get('price_volume_confirmation', True),
+                'min_confidence': strategy_configs.get('volume_min_confidence', 0.4)
+            }
+        }
+        
         # Create strategy
         strategy = EnhancedMLTradingStrategy(
             symbol=symbol,
@@ -211,6 +291,9 @@ class ProductionTradingOrchestrator:
             short_term_config=short_term_config,
             starting_portfolio_value=self.starting_capital
         )
+        
+        # Set technical configuration
+        strategy.config['technical_generators'] = technical_config
         
         self.strategies[symbol] = strategy
         if symbol not in self.symbols:
@@ -365,7 +448,7 @@ class ProductionTradingOrchestrator:
         Returns:
             Comprehensive backtest results
         """
-        from .simulation.enhanced_backtesting_runner import EnhancedBacktestingRunner
+        from simulation.enhanced_backtesting_runner import EnhancedBacktestingRunner
         backtest_runner = EnhancedBacktestingRunner(self)
         return backtest_runner.run_comprehensive_backtest(
             symbol=symbol,
@@ -578,8 +661,9 @@ class ProductionTradingOrchestrator:
         return EnhancedBacktestingRunner(self)
 
     def create_trading_chart(self, symbol: str = "AAPL", timeframe: str = "1D", 
-                           indicators: Optional[List[str]] = None, period: str = "6mo") -> str:
-        """Create TradingView-style chart with enhanced functionality"""
+                           indicators: Optional[List[str]] = None, period: str = "6mo",
+                           include_backtest: bool = True) -> str:
+        """Create TradingView-style chart with enhanced functionality and real signals"""
         if not self.chart_generator:
             return "Error: TradingViewChartGenerator not available"
         
@@ -588,13 +672,97 @@ class ProductionTradingOrchestrator:
                 indicators = ["SMA", "EMA", "RSI", "MACD", "Bollinger Bands"]
             
             print(f"[CHART] Generating TradingView chart for {symbol}")
-            chart_path = self.chart_generator.create_comprehensive_chart(symbol, period)
+            
+            # Generate real trading signals for the chart
+            real_signals = self._generate_real_signals_for_chart(symbol, period)
+            
+            # Get backtest results if requested
+            backtest_results = None
+            if include_backtest:
+                try:
+                    print(f"[CHART] Running quick backtest for {symbol} chart data...")
+                    backtest_results = self.run_comprehensive_backtest(symbol)
+                    if 'error' not in backtest_results:
+                        print(f"[CHART] Backtest completed for chart display")
+                    else:
+                        print(f"[CHART] Backtest failed, using sample data: {backtest_results.get('error', 'Unknown')}")
+                        backtest_results = None
+                except Exception as e:
+                    print(f"[CHART] Could not run backtest for chart: {e}")
+                    backtest_results = None
+            
+            # Create chart with real signals and backtest results
+            chart_path = self.chart_generator.create_comprehensive_chart(
+                symbol, period, real_signals=real_signals, backtest_results=backtest_results
+            )
             print(f"[CHART] Chart created successfully: {chart_path}")
             return chart_path
         except Exception as e:
             error_msg = f"Error creating trading chart: {e}"
             print(f"[CHART] {error_msg}")
             return error_msg
+    
+    def _generate_real_signals_for_chart(self, symbol: str, period: str) -> List:
+        """Generate real trading signals for chart display"""
+        try:
+            # Import here to avoid circular imports
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+            
+            from .trading.enhanced_strategies import EnhancedMLTradingStrategy
+            
+            # Get market data for the period
+            if period == "6mo":
+                days = 180
+            elif period == "1y":
+                days = 365
+            elif period == "3mo":
+                days = 90
+            else:
+                days = 180  # Default
+            
+            end_date = dt.datetime.now()
+            start_date = end_date - dt.timedelta(days=days + 30)  # Extra data for signals
+            
+            market_data = self.data_provider.get_market_data(
+                symbols=[symbol],
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            if symbol not in market_data or len(market_data[symbol]) < 50:
+                print(f"[CHART] Insufficient data for real signals, chart will show price data only")
+                return None
+            
+            # Create trading strategy
+            strategy = EnhancedMLTradingStrategy(
+                symbol=symbol,
+                model_manager=self.model_manager,
+                data_provider=self.data_provider
+            )
+            
+            # Generate signals for recent period
+            data = market_data[symbol]
+            all_signals = []
+            
+            # Generate signals day by day for the last portion of data
+            signal_start_idx = max(20, len(data) - 60)  # Last 60 days with 20-day warmup
+            
+            for i in range(signal_start_idx, len(data)):
+                day_data = data.iloc[:i+1]
+                if len(day_data) >= 20:  # Minimum data for signals
+                    timestamp = day_data.index[-1]
+                    signal = strategy.generate_signal(day_data, timestamp)
+                    if signal and signal.signal_type.name != 'HOLD':  # Only add BUY/SELL signals
+                        all_signals.append(signal)
+            
+            print(f"[CHART] Generated {len(all_signals)} real signals for {symbol}")
+            return all_signals
+            
+        except Exception as e:
+            print(f"[CHART] Error generating real signals: {e}")
+            return None
 
     def get_system_status(self) -> Dict[str, Any]:
         """Get comprehensive system status for production components"""

@@ -1,0 +1,34 @@
+{
+  "symbol": "TSLA",
+  "version": "1",
+  "created_at": "2025-09-29T12:18:57.164395",
+  "model_type": "RandomForestClassifier",
+  "performance_metrics": {
+    "train_accuracy": 0.7166666666666667,
+    "test_accuracy": 0.5217391304347826,
+    "train_samples": 180,
+    "test_samples": 46,
+    "feature_count": 7
+  },
+  "feature_names": [
+    "price_change_1d",
+    "price_change_5d",
+    "sma_5_diff",
+    "sma_10_diff",
+    "volatility",
+    "rsi",
+    "price_position"
+  ],
+  "training_period": [
+    "2024-09-29T12:18:56.040022",
+    "2025-09-29T12:18:56.040022"
+  ],
+  "config_snapshot": {
+    "algorithm": "RandomForest",
+    "training_period_days": 365,
+    "test_split": 0.2,
+    "training_samples": 226
+  },
+  "file_path": "models\\trained_models\\TSLA\\TSLA_v1_20250929_121857.pkl",
+  "status": "ModelStatus.TRAINED"
+}

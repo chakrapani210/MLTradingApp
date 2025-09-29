@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 import warnings
 
-from ..interfaces.backtester import Backtester, BacktestResult
-from ..interfaces.trading_strategy import TradingStrategy, TradingSignal
+from ..interfaces.backtester import Backtester, BacktestResult, BacktestConfig
+from ..interfaces.trading_strategy import TradingStrategy, TradingSignal, StrategyPerformance
 from ..interfaces.risk_manager import RiskManager
 from ..interfaces.data_provider import DataProvider
 
@@ -308,7 +308,7 @@ class EnhancedBacktester(Backtester):
         
         # Get historical data for all symbols + benchmark
         all_symbols = symbols + [benchmark_symbol]
-        historical_data = self.data_provider.get_historical_data(
+        historical_data = self.data_provider.get_market_data(
             symbols=all_symbols,
             start_date=start_date,
             end_date=end_date
@@ -379,25 +379,48 @@ class EnhancedBacktester(Backtester):
             equity_curve, self.benchmark_data, start_date, end_date
         )
         
-        # Create backtest result
-        result = BacktestResult(
+        # Create backtest result with simplified constructor
+        # Note: BacktestResults expects specific parameters, let's create a basic one
+        config = BacktestConfig(
             start_date=start_date,
             end_date=end_date,
-            initial_value=self.initial_cash,
-            final_value=equity_curve[-1][1] if equity_curve else self.initial_cash,
+            initial_capital=self.initial_cash,
+            commission=self.commission_rate,
+            slippage=self.slippage_rate
+        )
+        
+        # Convert equity curve to portfolio values series
+        equity_dates = [item[0] for item in equity_curve] if equity_curve else [start_date]
+        equity_values = [item[1] for item in equity_curve] if equity_curve else [self.initial_cash]
+        portfolio_values = pd.Series(equity_values, index=equity_dates)
+        
+        # Create strategy performance
+        strategy_performance = StrategyPerformance(
             total_return=performance_metrics.total_return,
+            annualized_return=getattr(performance_metrics, 'annualized_return', 0.0),
+            volatility=getattr(performance_metrics, 'volatility', 0.0),
             sharpe_ratio=performance_metrics.sharpe_ratio,
             max_drawdown=performance_metrics.max_drawdown,
+            win_rate=performance_metrics.win_rate,
+            profit_factor=getattr(performance_metrics, 'profit_factor', 1.0),
+            total_trades=len(self.portfolio.trades),
+            winning_trades=getattr(performance_metrics, 'winning_trades', 0),
+            losing_trades=getattr(performance_metrics, 'losing_trades', 0),
+            avg_win=getattr(performance_metrics, 'avg_win', 0.0),
+            avg_loss=getattr(performance_metrics, 'avg_loss', 0.0)
+        )
+        
+        # Create empty positions dataframe
+        positions_history = pd.DataFrame()
+        
+        result = BacktestResult(
+            strategy_name=strategy.__class__.__name__ if strategy else "EnhancedMLStrategy",
+            config=config,
+            performance=strategy_performance,
             trades=self.portfolio.trades,
-            performance_metrics=performance_metrics,
-            additional_metrics={
-                'equity_curve': equity_curve,
-                'signal_history': signal_history,
-                'trade_history': trade_history,
-                'positions_summary': self.portfolio.get_positions_summary(),
-                'symbols_traded': symbols,
-                'benchmark_symbol': benchmark_symbol
-            }
+            portfolio_values=portfolio_values,
+            positions_history=positions_history,
+            orders_history=[]  # We don't track orders separately yet
         )
         
         # Print summary
@@ -701,38 +724,31 @@ class EnhancedBacktester(Backtester):
         print("[BACKTEST] COMPREHENSIVE BACKTEST RESULTS")
         print("="*60)
         
+        # Calculate initial and final values from portfolio_values
+        initial_value = result.portfolio_values.iloc[0] if len(result.portfolio_values) > 0 else result.config.initial_capital
+        final_value = result.portfolio_values.iloc[-1] if len(result.portfolio_values) > 0 else result.config.initial_capital
+        
         # Performance Summary
         print(f"[PERFORMANCE] SUMMARY")
-        print(f"   Period: {result.start_date.strftime('%Y-%m-%d')} to {result.end_date.strftime('%Y-%m-%d')}")
-        print(f"   Initial Value: ${result.initial_value:,.0f}")
-        print(f"   Final Value: ${result.final_value:,.0f}")
-        print(f"   Total Return: {result.total_return:.1%}")
-        print(f"   Annualized Return: {result.performance_metrics.annualized_return:.1%}")
-        print(f"   Benchmark Return: {result.performance_metrics.benchmark_return:.1%}")
-        print(f"   Alpha: {result.performance_metrics.alpha:.1%}")
+        print(f"   Period: {result.config.start_date.strftime('%Y-%m-%d')} to {result.config.end_date.strftime('%Y-%m-%d')}")
+        print(f"   Initial Value: ${initial_value:,.0f}")
+        print(f"   Final Value: ${final_value:,.0f}")
+        print(f"   Total Return: {result.performance.total_return:.1%}")
+        print(f"   Annualized Return: {result.performance.annualized_return:.1%}")
         
         # Risk Metrics
         print(f"\n[RISK] METRICS")
-        print(f"   Volatility: {result.performance_metrics.volatility:.1%}")
-        print(f"   Sharpe Ratio: {result.performance_metrics.sharpe_ratio:.3f}")
-        print(f"   Sortino Ratio: {result.performance_metrics.sortino_ratio:.3f}")
-        print(f"   Max Drawdown: {result.performance_metrics.max_drawdown:.1%}")
-        print(f"   VaR (95%): {result.performance_metrics.value_at_risk:.1%}")
-        print(f"   Beta: {result.performance_metrics.beta:.3f}")
+        print(f"   Volatility: {result.performance.volatility:.1%}")
+        print(f"   Sharpe Ratio: {result.performance.sharpe_ratio:.3f}")
+        print(f"   Max Drawdown: {result.performance.max_drawdown:.1%}")
         
         # Trading Metrics
         print(f"\n[TRADING] METRICS")
-        print(f"   Total Trades: {result.performance_metrics.total_trades}")
-        print(f"   Win Rate: {result.performance_metrics.win_rate:.1%}")
-        print(f"   Profit Factor: {result.performance_metrics.profit_factor:.3f}")
-        print(f"   Avg Win: {result.performance_metrics.avg_win:.3f}")
-        print(f"   Avg Loss: {result.performance_metrics.avg_loss:.3f}")
-        
-        # Additional Ratios
-        print(f"\n[RATIOS] ADDITIONAL")
-        print(f"   Calmar Ratio: {result.performance_metrics.calmar_ratio:.3f}")
-        print(f"   Information Ratio: {result.performance_metrics.information_ratio:.3f}")
-        print(f"   Treynor Ratio: {result.performance_metrics.treynor_ratio:.3f}")
+        print(f"   Total Trades: {result.performance.total_trades}")
+        print(f"   Win Rate: {result.performance.win_rate:.1%}")
+        print(f"   Profit Factor: {result.performance.profit_factor:.3f}")
+        print(f"   Avg Win: {result.performance.avg_win:.3f}")
+        print(f"   Avg Loss: {result.performance.avg_loss:.3f}")
         
         print("="*60)
         print("[SUCCESS] Backtest completed successfully!")

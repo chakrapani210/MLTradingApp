@@ -12,11 +12,14 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ..interfaces.trading_strategy import TradingStrategy, TradingSignal, Position, Order, OrderType
-from ..interfaces.signal_generator import SignalGenerator
+from ..interfaces.signal_generator import SignalGenerator, SignalType
 from ..interfaces.model_manager import ModelManagerInterface
 from ..interfaces.risk_manager import RiskManager
 from ..data.providers import YFinanceProvider
-from ..signals.technical import RSISignalGenerator, MACDSignalGenerator, BollingerBandsSignalGenerator
+from ..signals.technical import (
+    RSISignalGenerator, MACDSignalGenerator, BollingerBandsSignalGenerator,
+    SMACrossoverSignalGenerator, EMASignalGenerator, VolumeAnalysisSignalGenerator
+)
 
 warnings.filterwarnings('ignore')
 
@@ -267,21 +270,23 @@ class GoldenCrossSignalGenerator(SignalGenerator):
             strength_threshold: Minimum strength for signal generation
             confirmation_days: Days to confirm pattern
         """
-        super().__init__()
+        super().__init__(name=f"GoldenCross_{short_window}_{long_window}")
         self.short_window = short_window
         self.long_window = long_window
         self.strength_threshold = strength_threshold
         self.confirmation_days = confirmation_days
-        self.name = f"GoldenCross_{short_window}_{long_window}"
     
-    def generate_signals(self, data: pd.DataFrame) -> List[TradingSignal]:
+    def generate_signals(self, data: pd.DataFrame, symbol: str) -> List[TradingSignal]:
         """Generate golden cross/death cross signals"""
         if len(data) < self.long_window:
             return []
         
+        # Extract close price column for MA calculation
+        close_data = data.iloc[:, 0]  # First column is typically close price
+        
         # Calculate moving averages
-        sma_short = data.rolling(window=self.short_window).mean()
-        sma_long = data.rolling(window=self.long_window).mean()
+        sma_short = close_data.rolling(window=self.short_window).mean()
+        sma_long = close_data.rolling(window=self.long_window).mean()
         
         signals = []
         
@@ -299,11 +304,12 @@ class GoldenCrossSignalGenerator(SignalGenerator):
                 
                 if strength >= self.strength_threshold:
                     signal = TradingSignal(
+                        symbol=symbol,
                         timestamp=current_date,
-                        symbol=data.name if hasattr(data, 'name') else 'UNKNOWN',
-                        direction=1,
+                        signal_type=SignalType.BUY,
                         confidence=strength,
-                        signal_type='GOLDEN_CROSS',
+                        strength=strength,
+                        source='GOLDEN_CROSS',
                         metadata={
                             'sma_short': float(sma_short.iloc[i]),
                             'sma_long': float(sma_long.iloc[i]),
@@ -323,11 +329,12 @@ class GoldenCrossSignalGenerator(SignalGenerator):
                 
                 if strength >= self.strength_threshold:
                     signal = TradingSignal(
+                        symbol=symbol,
                         timestamp=current_date,
-                        symbol=data.name if hasattr(data, 'name') else 'UNKNOWN',
-                        direction=-1,
+                        signal_type=SignalType.SELL,
                         confidence=strength,
-                        signal_type='DEATH_CROSS',
+                        strength=strength,
+                        source='DEATH_CROSS',
                         metadata={
                             'sma_short': float(sma_short.iloc[i]),
                             'sma_long': float(sma_long.iloc[i]),
@@ -376,25 +383,33 @@ class ShortTermPatternSignalGenerator(SignalGenerator):
             bb_std: Bollinger Bands standard deviation
             enable_candlestick: Enable candlestick pattern recognition
         """
-        super().__init__()
+        super().__init__(name=f"ShortTermPattern_RSI{rsi_period}_BB{bb_period}_Candle{enable_candlestick}")
         self.rsi_period = rsi_period
         self.bb_period = bb_period
         self.bb_std = bb_std
         self.enable_candlestick = enable_candlestick
-        self.name = f"ShortTermPattern_RSI{rsi_period}_BB{bb_period}_Candle{enable_candlestick}"
         
         # Initialize sub-generators
-        self.rsi_generator = RSISignalGenerator(period=rsi_period)
-        self.bb_generator = BollingerBandsSignalGenerator(period=bb_period, std_dev=bb_std)
+        self.rsi_generator = RSISignalGenerator(config={'period': rsi_period})
+        self.bb_generator = BollingerBandsSignalGenerator(config={'period': bb_period, 'std_dev': bb_std})
     
-    def generate_signals(self, data: pd.DataFrame) -> List[TradingSignal]:
+    def _signal_to_direction(self, signal: TradingSignal) -> int:
+        """Convert TradingSignal to direction for compatibility"""
+        if signal.signal_type == SignalType.BUY:
+            return 1
+        elif signal.signal_type == SignalType.SELL:
+            return -1
+        else:
+            return 0
+    
+    def generate_signals(self, data: pd.DataFrame, symbol: str) -> List[TradingSignal]:
         """Generate combined short-term pattern signals including candlestick patterns"""
         if len(data) < max(self.rsi_period, self.bb_period):
             return []
         
         # Get signals from individual generators
-        rsi_signals = self.rsi_generator.generate_signals(data)
-        bb_signals = self.bb_generator.generate_signals(data)
+        rsi_signals = self.rsi_generator.generate_signals(data, symbol)
+        bb_signals = self.bb_generator.generate_signals(data, symbol)
         
         # Get candlestick pattern signals if enabled
         candlestick_signals = []
@@ -432,12 +447,12 @@ class ShortTermPatternSignalGenerator(SignalGenerator):
             pattern_count = 0
             
             if rsi_signal:
-                combined_direction += rsi_signal.direction
+                combined_direction += self._signal_to_direction(rsi_signal)
                 combined_confidence += rsi_signal.confidence * 0.6  # RSI weight
                 pattern_count += 1
             
             if bb_signal:
-                combined_direction += bb_signal.direction
+                combined_direction += self._signal_to_direction(bb_signal)
                 combined_confidence += bb_signal.confidence * 0.4  # BB weight
                 pattern_count += 1
             
@@ -448,12 +463,21 @@ class ShortTermPatternSignalGenerator(SignalGenerator):
                 
                 # Only create signal if confidence is meaningful
                 if final_confidence >= 0.3:
+                    # Convert direction to signal type
+                    if final_direction > 0:
+                        signal_type = SignalType.BUY
+                    elif final_direction < 0:
+                        signal_type = SignalType.SELL
+                    else:
+                        signal_type = SignalType.HOLD
+                    
                     signal = TradingSignal(
                         timestamp=timestamp,
                         symbol=data.name if hasattr(data, 'name') else 'UNKNOWN',
-                        direction=final_direction,
+                        signal_type=signal_type,
                         confidence=final_confidence,
-                        signal_type='SHORT_TERM_PATTERN',
+                        strength=abs(final_direction),
+                        source='SHORT_TERM_PATTERN',
                         metadata={
                             'pattern_count': pattern_count,
                             'rsi_contribution': rsi_signal.confidence if rsi_signal else 0,
@@ -534,9 +558,10 @@ class ShortTermPatternSignalGenerator(SignalGenerator):
                     signal = TradingSignal(
                         timestamp=timestamp,
                         symbol=data.name if hasattr(data, 'name') else 'UNKNOWN',
-                        direction=1,
+                        signal_type=SignalType.BUY,
                         confidence=min(1.0, bullish_strength),
-                        signal_type='CANDLESTICK_BULLISH',
+                        strength=bullish_strength,
+                        source='CANDLESTICK_BULLISH',
                         metadata={
                             'patterns': detected_patterns,
                             'strength': bullish_strength,
@@ -548,9 +573,10 @@ class ShortTermPatternSignalGenerator(SignalGenerator):
                     signal = TradingSignal(
                         timestamp=timestamp,
                         symbol=data.name if hasattr(data, 'name') else 'UNKNOWN',
-                        direction=-1,
+                        signal_type=SignalType.SELL,
                         confidence=min(1.0, bearish_strength),
-                        signal_type='CANDLESTICK_BEARISH',
+                        strength=bearish_strength,
+                        source='CANDLESTICK_BEARISH',
                         metadata={
                             'patterns': detected_patterns,
                             'strength': bearish_strength,
@@ -602,17 +628,17 @@ class ShortTermPatternSignalGenerator(SignalGenerator):
             pattern_count = 0
             
             if rsi_signal:
-                combined_direction += rsi_signal.direction
+                combined_direction += self._signal_to_direction(rsi_signal)
                 combined_confidence += rsi_signal.confidence * 0.4  # RSI weight (reduced)
                 pattern_count += 1
             
             if bb_signal:
-                combined_direction += bb_signal.direction
+                combined_direction += self._signal_to_direction(bb_signal)
                 combined_confidence += bb_signal.confidence * 0.3  # BB weight (reduced)
                 pattern_count += 1
             
             if candlestick_signal:
-                combined_direction += candlestick_signal.direction
+                combined_direction += self._signal_to_direction(candlestick_signal)
                 combined_confidence += candlestick_signal.confidence * 0.3  # Candlestick weight
                 pattern_count += 1
             
@@ -623,12 +649,21 @@ class ShortTermPatternSignalGenerator(SignalGenerator):
                 
                 # Only create signal if confidence is meaningful
                 if final_confidence >= 0.3:
+                    # Convert direction to signal type
+                    if final_direction > 0:
+                        signal_type = SignalType.BUY
+                    elif final_direction < 0:
+                        signal_type = SignalType.SELL
+                    else:
+                        signal_type = SignalType.HOLD
+                    
                     signal = TradingSignal(
                         timestamp=timestamp,
                         symbol=data.name if hasattr(data, 'name') else 'UNKNOWN',
-                        direction=final_direction,
+                        signal_type=signal_type,
                         confidence=final_confidence,
-                        signal_type='SHORT_TERM_PATTERN',
+                        strength=abs(final_direction),
+                        source='SHORT_TERM_PATTERN',
                         metadata={
                             'pattern_count': pattern_count,
                             'rsi_contribution': rsi_signal.confidence if rsi_signal else 0,
@@ -774,12 +809,73 @@ class EnhancedMLTradingStrategy(TradingStrategy):
             )
             self.signal_generators.append(self.short_term_generator)
         
-        # Add individual technical generators
-        self.signal_generators.extend([
-            RSISignalGenerator(period=14),
-            MACDSignalGenerator(fast_period=12, slow_period=26, signal_period=9),
-            BollingerBandsSignalGenerator(period=20, std_dev=2.0)
-        ])
+        # Add individual technical generators with configuration
+        technical_config = self.config.get('technical_generators', {})
+        
+        # RSI Generator
+        rsi_config = technical_config.get('rsi', {'period': 14})
+        if rsi_config.get('enabled', True):
+            self.signal_generators.append(RSISignalGenerator(config=rsi_config))
+        
+        # MACD Generator  
+        macd_config = technical_config.get('macd', {
+            'fast_period': 12, 'slow_period': 26, 'signal_period': 9
+        })
+        if macd_config.get('enabled', True):
+            self.signal_generators.append(MACDSignalGenerator(config=macd_config))
+        
+        # Bollinger Bands Generator
+        bb_config = technical_config.get('bollinger_bands', {'period': 20, 'std_dev': 2.0})
+        if bb_config.get('enabled', True):
+            self.signal_generators.append(BollingerBandsSignalGenerator(config=bb_config))
+        
+        # SMA Crossover Generator
+        sma_config = technical_config.get('sma_crossover', {
+            'short_period': 20, 'long_period': 50, 
+            'signal_strength_threshold': 0.5,
+            'confirmation_periods': 2
+        })
+        if sma_config.get('enabled', True):
+            self.signal_generators.append(SMACrossoverSignalGenerator(config=sma_config))
+        
+        # EMA Generator
+        ema_config = technical_config.get('ema', {
+            'periods': [12, 26], 
+            'crossover_pairs': [(12, 26)],
+            'slope_threshold': 0.001,
+            'min_confidence': 0.3
+        })
+        if ema_config.get('enabled', True):
+            self.signal_generators.append(EMASignalGenerator(config=ema_config))
+        
+        # Volume Analysis Generator
+        volume_config = technical_config.get('volume_analysis', {
+            'volume_surge_threshold': 2.0,
+            'volume_sma_period': 20,
+            'obv_period': 10,
+            'price_volume_confirmation': True,
+            'min_confidence': 0.4
+        })
+        if volume_config.get('enabled', True):
+            self.signal_generators.append(VolumeAnalysisSignalGenerator(config=volume_config))
+        
+        print(f"[INIT] Initialized {len(self.signal_generators)} signal generators:")
+        for generator in self.signal_generators:
+            print(f"       - {generator.name}")
+    
+    def _signal_to_direction(self, signal: TradingSignal) -> int:
+        """
+        Convert new TradingSignal format to direction for compatibility
+        
+        Returns:
+            1 for BUY, -1 for SELL, 0 for HOLD
+        """
+        if signal.signal_type == SignalType.BUY:
+            return 1
+        elif signal.signal_type == SignalType.SELL:
+            return -1
+        else:
+            return 0
     
     def generate_signal(self, data: pd.DataFrame, timestamp: pd.Timestamp) -> TradingSignal:
         """Generate trading signal using all available generators and ML model"""
@@ -787,7 +883,7 @@ class EnhancedMLTradingStrategy(TradingStrategy):
         all_signals = []
         for generator in self.signal_generators:
             try:
-                signals = generator.generate_signals(data)
+                signals = generator.generate_signals(data, self.symbol)
                 # Get the most recent signal
                 if signals:
                     latest_signal = max(signals, key=lambda s: s.timestamp)
@@ -815,22 +911,45 @@ class EnhancedMLTradingStrategy(TradingStrategy):
         """Combine multiple signals intelligently"""
         if not signals:
             return TradingSignal(
-                timestamp=timestamp,
                 symbol=self.symbol,
-                direction=0,
+                timestamp=timestamp,
+                signal_type=SignalType.HOLD,
                 confidence=0.0,
-                signal_type='COMBINED_NO_SIGNAL',
+                strength=0.0,
+                source='COMBINED_NO_SIGNAL',
                 metadata={'reason': 'No signals generated'}
             )
         
-        # Weight different signal types
+        # Enhanced weight system for all signal types
         signal_weights = {
-            'GOLDEN_CROSS': 0.3,
-            'DEATH_CROSS': 0.3,
-            'SHORT_TERM_PATTERN': 0.2,
-            'RSI': 0.1,
-            'MACD': 0.1,
-            'BOLLINGER_BANDS': 0.1
+            # Golden Cross/Death Cross patterns
+            'GOLDEN_CROSS': 0.20,
+            'DEATH_CROSS': 0.20,
+            'SMA_GOLDEN_CROSS': 0.18,
+            'SMA_DEATH_CROSS': 0.18,
+            
+            # EMA signals
+            'EMA_BULLISH_CROSS': 0.15,
+            'EMA_BEARISH_CROSS': 0.15,
+            
+            # Volume signals (important confirmation)
+            'VOLUME_BREAKOUT': 0.25,
+            'OBV_BULLISH_DIVERGENCE': 0.15,
+            'OBV_BEARISH_DIVERGENCE': 0.15,
+            
+            # Short-term patterns
+            'SHORT_TERM_PATTERN': 0.12,
+            
+            # Individual technical indicators
+            'RSI_OVERSOLD': 0.08,
+            'RSI_OVERBOUGHT': 0.08,
+            'MACD_BULLISH': 0.10,
+            'MACD_BEARISH': 0.10,
+            'BOLLINGER_UPPER': 0.08,
+            'BOLLINGER_LOWER': 0.08,
+            
+            # Default weight for unknown signal types
+            'DEFAULT': 0.05
         }
         
         # Calculate weighted average
@@ -839,13 +958,13 @@ class EnhancedMLTradingStrategy(TradingStrategy):
         signal_contributions = {}
         
         for signal in signals:
-            weight = signal_weights.get(signal.signal_type, 0.1)
-            weighted_contribution = signal.direction * signal.confidence * weight
+            weight = signal_weights.get(signal.signal_type, signal_weights['DEFAULT'])
+            weighted_contribution = self._signal_to_direction(signal) * signal.confidence * weight
             total_direction += weighted_contribution
             total_confidence += signal.confidence * weight
             
             signal_contributions[signal.signal_type] = {
-                'direction': signal.direction,
+                'direction': self._signal_to_direction(signal),
                 'confidence': signal.confidence,
                 'weight': weight,
                 'contribution': weighted_contribution
@@ -855,12 +974,21 @@ class EnhancedMLTradingStrategy(TradingStrategy):
         final_direction = 1 if total_direction > 0.1 else (-1 if total_direction < -0.1 else 0)
         final_confidence = min(1.0, abs(total_confidence))
         
+        # Convert direction to signal type
+        if final_direction > 0:
+            signal_type = SignalType.BUY
+        elif final_direction < 0:
+            signal_type = SignalType.SELL
+        else:
+            signal_type = SignalType.HOLD
+        
         return TradingSignal(
-            timestamp=timestamp,
             symbol=self.symbol,
-            direction=final_direction,
+            timestamp=timestamp,
+            signal_type=signal_type,
             confidence=final_confidence,
-            signal_type='COMBINED_ENHANCED',
+            strength=abs(total_direction),
+            source='COMBINED_ENHANCED',
             metadata={
                 'signal_count': len(signals),
                 'contributions': signal_contributions,
@@ -871,29 +999,149 @@ class EnhancedMLTradingStrategy(TradingStrategy):
     
     def _get_ml_prediction(self, data: pd.DataFrame, timestamp: pd.Timestamp) -> Optional[TradingSignal]:
         """Get ML model prediction if available"""
-        # This would interface with the ML model manager
-        # For now, return None - implement based on model_manager interface
-        return None
+        try:
+            # Check if model exists for this symbol
+            if not self.model_manager.model_exists(self.symbol):
+                return None
+            
+            # Prepare features for ML prediction
+            features = self._prepare_ml_features(data)
+            if features is None:
+                return None
+            
+            # Get ML prediction
+            prediction_result = self.model_manager.predict(
+                symbol=self.symbol,
+                features=features.reshape(1, -1)
+            )
+            
+            if not prediction_result.predictions:
+                return None
+            
+            prediction = prediction_result.predictions[0]
+            confidence = prediction_result.confidence
+            
+            # Only generate signal if prediction is confident enough
+            if abs(prediction) > 0 and confidence >= 0.6:
+                return TradingSignal(
+                    symbol=self.symbol,
+                    timestamp=timestamp,
+                    signal_type=SignalType.BUY if prediction > 0 else SignalType.SELL,
+                    confidence=confidence,
+                    strength=abs(float(prediction)),
+                    source='ML_PREDICTION',
+                    metadata={
+                        'model_version': prediction_result.model_version,
+                        'feature_importance': prediction_result.feature_importance,
+                        'prediction_confidence': confidence,
+                        'model_type': 'ML',
+                        'prediction_metadata': prediction_result.prediction_metadata,
+                        'prediction_value': prediction
+                    }
+                )
+            
+            return None
+            
+        except Exception as e:
+            print(f"[ML_PREDICTION] Error getting ML prediction for {self.symbol}: {e}")
+            return None
+    
+    def _prepare_ml_features(self, data: pd.DataFrame) -> Optional[np.ndarray]:
+        """Prepare features for ML model prediction"""
+        try:
+            if len(data) < 20:  # Need minimum data for feature calculation
+                return None
+            
+            # Use the last 20 periods for feature calculation
+            recent_data = data.tail(20)
+            # Extract scalar values from pandas Series
+            close_col = 'Close' if 'Close' in data.columns else data.columns[0]
+            current_price = recent_data[close_col].iloc[-1]
+            
+            features = []
+            
+            # Price-based features
+            price_change_1d = (recent_data[close_col].iloc[-1] - recent_data[close_col].iloc[-2]) / recent_data[close_col].iloc[-2] if len(recent_data) >= 2 else 0
+            price_change_5d = (recent_data[close_col].iloc[-1] - recent_data[close_col].iloc[-6]) / recent_data[close_col].iloc[-6] if len(recent_data) >= 6 else 0
+            
+            # Moving averages
+            sma_5 = recent_data[close_col].tail(5).mean() if len(recent_data) >= 5 else current_price
+            sma_10 = recent_data[close_col].tail(10).mean() if len(recent_data) >= 10 else current_price
+            
+            # Volatility
+            volatility = recent_data[close_col].tail(10).std() if len(recent_data) >= 10 else 0.02
+            
+            # RSI calculation
+            returns = recent_data[close_col].pct_change().dropna()
+            if len(returns) >= 14:
+                up_moves = returns.where(returns > 0, 0)
+                down_moves = returns.where(returns < 0, 0).abs()
+                avg_up = up_moves.tail(14).mean()
+                avg_down = down_moves.tail(14).mean()
+                rs = avg_up / avg_down if avg_down != 0 else 100
+                rsi = 100 - (100 / (1 + rs))
+            else:
+                rsi = 50
+            
+            # Price position within range
+            price_min = recent_data[close_col].min()
+            price_max = recent_data[close_col].max()
+            price_position = (current_price - price_min) / (price_max - price_min) if price_max != price_min else 0.5
+            
+            # Assemble feature vector
+            features = [
+                price_change_1d,
+                price_change_5d, 
+                (sma_5 - current_price) / current_price,
+                (sma_10 - current_price) / current_price,
+                volatility,
+                rsi / 100.0,  # Normalize RSI
+                price_position
+            ]
+            
+            # Ensure no NaN values
+            features = [0.0 if pd.isna(f) else float(f) for f in features]
+            
+            return np.array(features, dtype=np.float32)
+            
+        except Exception as e:
+            print(f"[ML_FEATURES] Error preparing features for {self.symbol}: {e}")
+            return None
     
     def _enhance_signal_with_ml(self, base_signal: TradingSignal, 
                                ml_signal: TradingSignal) -> TradingSignal:
         """Enhance base signal with ML prediction"""
-        # Combine base signal with ML prediction
-        combined_direction = (base_signal.direction * 0.4 + ml_signal.direction * 0.6)
-        final_direction = 1 if combined_direction > 0.2 else (-1 if combined_direction < -0.2 else 0)
+        # Convert signal types to numeric values for combination
+        base_strength = base_signal.strength if base_signal.signal_type == SignalType.BUY else -base_signal.strength
+        ml_strength = ml_signal.strength if ml_signal.signal_type == SignalType.BUY else -ml_signal.strength
         
+        # Combine signals (60% ML, 40% technical)
+        combined_strength = (base_strength * 0.4 + ml_strength * 0.6)
         combined_confidence = (base_signal.confidence * 0.4 + ml_signal.confidence * 0.6)
         
+        # Determine final signal type
+        if combined_strength > 0.2:
+            final_signal_type = SignalType.BUY
+            final_strength = abs(combined_strength)
+        elif combined_strength < -0.2:
+            final_signal_type = SignalType.SELL
+            final_strength = abs(combined_strength)
+        else:
+            final_signal_type = SignalType.HOLD
+            final_strength = 0.0
+        
         return TradingSignal(
-            timestamp=base_signal.timestamp,
             symbol=self.symbol,
-            direction=final_direction,
+            timestamp=base_signal.timestamp,
+            signal_type=final_signal_type,
             confidence=combined_confidence,
-            signal_type='ML_ENHANCED',
+            strength=final_strength,
+            source='ML_ENHANCED',
             metadata={
                 'base_signal': base_signal.metadata,
                 'ml_signal': ml_signal.metadata,
-                'enhancement_method': 'ml_weighted_combination'
+                'enhancement_method': 'ml_weighted_combination',
+                'combination_weights': {'technical': 0.4, 'ml': 0.6}
             }
         )
     

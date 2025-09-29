@@ -246,24 +246,18 @@ class EnhancedModelManager(ModelManagerInterface):
         with open(model_path, 'wb') as f:
             pickle.dump(model, f)
         
-        # Enhanced metadata
+        # Enhanced metadata - use the interface-compliant structure
         enhanced_metadata = ModelMetadata(
             symbol=symbol,
-            model_type=type(model).__name__,
-            version=version,
+            version=str(version),
             created_at=dt.datetime.now(),
-            feature_names=metadata.feature_names,
+            model_type=type(model).__name__,
             performance_metrics=metadata.performance_metrics,
-            training_params=metadata.training_params,
-            model_path=model_path,
-            file_size=os.path.getsize(model_path) if os.path.exists(model_path) else 0,
-            additional_info={
-                'timestamp': timestamp,
-                'sklearn_version': getattr(model, '__module__', 'unknown'),
-                'feature_count': len(metadata.feature_names) if metadata.feature_names else 0,
-                'training_samples': metadata.training_params.get('training_samples', 0),
-                'model_parameters': self._extract_model_parameters(model)
-            }
+            feature_names=metadata.feature_names,
+            training_period=metadata.training_period,
+            config_snapshot=metadata.config_snapshot,
+            file_path=model_path,
+            status=metadata.status
         )
         
         # Save metadata
@@ -322,13 +316,14 @@ class EnhancedModelManager(ModelManagerInterface):
             # Create minimal metadata if not found
             metadata = ModelMetadata(
                 symbol=symbol,
-                model_type=type(model).__name__,
                 version=version,
                 created_at=dt.datetime.now(),
-                feature_names=[],
+                model_type=type(model).__name__,
                 performance_metrics={},
-                training_params={},
-                model_path=model_path
+                feature_names=[],
+                training_period=(dt.datetime.now() - dt.timedelta(days=365), dt.datetime.now()),
+                config_snapshot={},
+                file_path=model_path
             )
         
         # Update cache
@@ -336,6 +331,7 @@ class EnhancedModelManager(ModelManagerInterface):
         self._metadata_cache[cache_key] = metadata
         
         print(f"[MODEL_LOAD] Model loaded for {symbol} v{version}")
+        return model, metadata
         
     def _create_model(self, algorithm: str, **params) -> BaseEstimator:
         """
@@ -497,10 +493,11 @@ class EnhancedModelManager(ModelManagerInterface):
             
             # Calculate confidence scores
             confidence_scores = self._calculate_confidence_scores(predictions, prediction_proba)
+            overall_confidence = float(np.mean(confidence_scores))
             
             result = PredictionResult(
-                predictions=predictions.tolist(),
-                confidence_scores=confidence_scores,
+                predictions=predictions,
+                confidence=overall_confidence,
                 model_version=metadata.version,
                 feature_importance=self._get_feature_importance(model, metadata.feature_names),
                 prediction_metadata={
@@ -508,7 +505,8 @@ class EnhancedModelManager(ModelManagerInterface):
                     'prediction_timestamp': dt.datetime.now().isoformat(),
                     'feature_count': features.shape[1],
                     'sample_count': features.shape[0],
-                    'has_probabilities': prediction_proba is not None
+                    'has_probabilities': prediction_proba is not None,
+                    'confidence_scores': confidence_scores  # Individual confidence scores
                 }
             )
             
@@ -678,8 +676,18 @@ class EnhancedModelManager(ModelManagerInterface):
             True if model exists, False otherwise
         """
         try:
-            metadata = self.get_model_metadata(symbol, version)
-            return metadata is not None
+            models = self.list_models(symbol)
+            if not models:
+                return False
+            
+            if version is None:
+                return True  # At least one model exists
+            
+            # Check for specific version
+            for model in models:
+                if model.version == version:
+                    return True
+            return False
         except Exception:
             return False
     
@@ -695,18 +703,20 @@ class EnhancedModelManager(ModelManagerInterface):
             Validation results dictionary
         """
         try:
-            metadata = self.get_model_metadata(symbol, version)
-            if metadata:
-                return {
-                    'valid': True,
-                    'symbol': symbol,
-                    'version': metadata.version,
-                    'status': metadata.status.value,
-                    'performance_metrics': metadata.performance_metrics,
-                    'model_type': metadata.model_type
-                }
-            else:
-                return {'valid': False, 'error': 'Model not found'}
+            if version is None:
+                version = self._get_latest_version(symbol)
+            
+            # Try to load the model to validate it exists and is accessible
+            model, metadata = self.load_model(symbol, version)
+            
+            return {
+                'valid': True,
+                'symbol': symbol,
+                'version': metadata.version,
+                'status': metadata.status.value,
+                'performance_metrics': metadata.performance_metrics,
+                'model_type': metadata.model_type
+            }
         except Exception as e:
             return {'valid': False, 'error': str(e)}
     
@@ -900,7 +910,7 @@ class ModelTrainingService:
         end_date = dt.datetime.now()
         start_date = end_date - dt.timedelta(days=training_period_days)
         
-        training_data = self.data_provider.get_historical_data(
+        training_data = self.data_provider.get_market_data(
             symbols=[symbol],
             start_date=start_date,
             end_date=end_date
@@ -945,14 +955,14 @@ class ModelTrainingService:
                 'test_samples': len(X_test),
                 'feature_count': len(feature_names)
             },
-            training_params={
+            training_period=(start_date, end_date),
+            config_snapshot={
                 'algorithm': algorithm,
                 'training_period_days': training_period_days,
                 'test_split': test_split,
-                'training_start': start_date.isoformat(),
-                'training_end': end_date.isoformat(),
                 'training_samples': len(features)
-            }
+            },
+            file_path=""  # Will be set by model manager
         )
         
         # Save model
@@ -990,17 +1000,22 @@ class ModelTrainingService:
             window_data = data.iloc[i-20:i+1]
             
             # Features
-            current_price = data.iloc[i]
-            price_change_1d = (data.iloc[i] - data.iloc[i-1]) / data.iloc[i-1]
-            price_change_5d = (data.iloc[i] - data.iloc[i-5]) / data.iloc[i-5]
+            current_price = data.iloc[i]['Close'] if 'Close' in data.columns else data.iloc[i].iloc[0]
+            prev_price_1d = data.iloc[i-1]['Close'] if 'Close' in data.columns else data.iloc[i-1].iloc[0]
+            prev_price_5d = data.iloc[i-5]['Close'] if 'Close' in data.columns else data.iloc[i-5].iloc[0]
             
-            sma_5 = data.iloc[i-4:i+1].mean()
-            sma_10 = data.iloc[i-9:i+1].mean()
+            price_change_1d = (current_price - prev_price_1d) / prev_price_1d
+            price_change_5d = (current_price - prev_price_5d) / prev_price_5d
             
-            volatility = data.iloc[i-9:i+1].std()
+            # Use Close price for calculations
+            close_col = 'Close' if 'Close' in data.columns else data.columns[0]
+            sma_5 = data[close_col].iloc[i-4:i+1].mean()
+            sma_10 = data[close_col].iloc[i-9:i+1].mean()
+            
+            volatility = data[close_col].iloc[i-9:i+1].std()
             
             # RSI calculation (simplified)
-            returns = data.iloc[i-14:i+1].pct_change().dropna()
+            returns = data[close_col].iloc[i-14:i+1].pct_change().dropna()
             up_moves = returns.where(returns > 0, 0)
             down_moves = returns.where(returns < 0, 0).abs()
             avg_up = up_moves.mean()
@@ -1008,7 +1023,8 @@ class ModelTrainingService:
             rs = avg_up / avg_down if avg_down != 0 else 100
             rsi = 100 - (100 / (1 + rs))
             
-            price_position = (current_price - window_data.min()) / (window_data.max() - window_data.min()) if window_data.max() != window_data.min() else 0.5
+            window_close = data[close_col].iloc[i-20:i+1]
+            price_position = (current_price - window_close.min()) / (window_close.max() - window_close.min()) if window_close.max() != window_close.min() else 0.5
             
             features = [
                 price_change_1d,
@@ -1021,7 +1037,7 @@ class ModelTrainingService:
             ]
             
             # Label (future return)
-            future_price = data.iloc[i+3]
+            future_price = data.iloc[i+3]['Close'] if 'Close' in data.columns else data.iloc[i+3].iloc[0]
             future_return = (future_price - current_price) / current_price
             
             if future_return > 0.02:

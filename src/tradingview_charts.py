@@ -16,6 +16,9 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 
+# Import the main TradingSignal from the interfaces module
+from .interfaces.signal_generator import TradingSignal, SignalType as MainSignalType
+
 
 class SignalType(Enum):
     BUY = 1
@@ -28,17 +31,6 @@ class OrderType(Enum):
     LIMIT = "limit"
     STOP = "stop"
     STOP_LIMIT = "stop_limit"
-
-
-@dataclass
-class TradingSignal:
-    timestamp: datetime
-    symbol: str
-    signal_type: SignalType
-    confidence: float
-    price: float
-    source: str
-    reason: str = ""
 
 
 @dataclass
@@ -171,159 +163,62 @@ class TradingViewChartGenerator:
             return data
         except Exception as e:
             print(f"Error fetching data for {symbol}: {e}")
-            # Return sample data if fetch fails
-            return self._generate_sample_data(symbol)
-    
-    def _generate_sample_data(self, symbol: str, days: int = 252) -> pd.DataFrame:
-        """Generate sample market data for demonstration"""
-        dates = pd.date_range(end=datetime.now(), periods=days, freq='D')
+            # Return empty DataFrame if fetch fails
+            return pd.DataFrame()
+
+    def _convert_real_signals_to_chart_format(self, real_signals: List, data: pd.DataFrame) -> List[TradingSignal]:
+        """Convert real trading signals to chart format using the main TradingSignal structure"""
+        chart_signals = []
         
-        # Generate realistic price data
-        np.random.seed(42)  # For reproducible results
-        price = 150  # Starting price
-        prices = []
-        volumes = []
-        
-        for i in range(days):
-            # Random walk with slight upward bias
-            change = np.random.normal(0.001, 0.02)  # 0.1% mean, 2% std
-            price = price * (1 + change)
-            prices.append(price)
-            
-            # Generate volume (higher on price moves)
-            base_volume = 1000000
-            volume_multiplier = 1 + abs(change) * 10
-            volume = int(base_volume * volume_multiplier * np.random.uniform(0.5, 2.0))
-            volumes.append(volume)
-        
-        # Create OHLC data
-        data = pd.DataFrame(index=dates)
-        data['Close'] = prices
-        
-        # Generate OHLC from close prices with better error handling
-        data['Open'] = data['Close'].shift(1)
-        data['Open'].iloc[0] = prices[0]  # Set first value explicitly
-        
-        # Create arrays for vectorized operations
-        high_multiplier = np.random.uniform(1.000, 1.020, len(data))
-        low_multiplier = np.random.uniform(0.980, 1.000, len(data))
-        
-        data['High'] = np.maximum(data['Open'].values, data['Close'].values) * high_multiplier
-        data['Low'] = np.minimum(data['Open'].values, data['Close'].values) * low_multiplier
-        data['Volume'] = volumes
-        
-        return data
-    
-    def generate_sample_signals(self, data: pd.DataFrame, symbol: str) -> List[TradingSignal]:
-        """Generate sample trading signals for demonstration"""
-        signals = []
-        
-        # Calculate RSI for signal generation
-        rsi = TechnicalIndicators.rsi(data['Close'])
-        
-        for i in range(50, len(data), 10):  # Every 10 days starting from day 50
-            timestamp = data.index[i]
-            price = data['Close'].iloc[i]
-            rsi_value = rsi.iloc[i] if not pd.isna(rsi.iloc[i]) else 50
-            
-            # Generate signals based on RSI
-            if rsi_value < 30:  # Oversold
-                signal = TradingSignal(
-                    timestamp=timestamp,
-                    symbol=symbol,
-                    signal_type=SignalType.BUY,
-                    confidence=min(0.9, (30 - rsi_value) / 30 + 0.5),
-                    price=price,
-                    source="RSI_Strategy",
-                    reason=f"RSI oversold: {rsi_value:.1f}"
-                )
-                signals.append(signal)
-            elif rsi_value > 70:  # Overbought
-                signal = TradingSignal(
-                    timestamp=timestamp,
-                    symbol=symbol,
-                    signal_type=SignalType.SELL,
-                    confidence=min(0.9, (rsi_value - 70) / 30 + 0.5),
-                    price=price,
-                    source="RSI_Strategy",
-                    reason=f"RSI overbought: {rsi_value:.1f}"
-                )
-                signals.append(signal)
-        
-        return signals
-    
-    def generate_sample_orders(self, signals: List[TradingSignal], portfolio_value: float = 100000) -> List[Order]:
-        """Generate sample orders based on signals"""
-        orders = []
-        position_size_pct = 0.08  # 8% of portfolio per trade
-        
-        for signal in signals:
-            if signal.confidence > 0.5:  # Lower threshold to generate more orders
-                side = 'buy' if signal.signal_type == SignalType.BUY else 'sell'
-                size_usd = portfolio_value * position_size_pct * signal.confidence
-                quantity = size_usd / signal.price
+        for signal in real_signals:
+            try:
+                # Skip HOLD signals for cleaner charts
+                if hasattr(signal, 'signal_type') and signal.signal_type == MainSignalType.HOLD:
+                    continue
                 
-                order = Order(
-                    timestamp=signal.timestamp,
+                # Find the price at the signal timestamp
+                signal_date = signal.timestamp
+                closest_idx = data.index.get_indexer([signal_date], method='nearest')[0]
+                price = data['Close'].iloc[closest_idx] if closest_idx >= 0 else 0.0
+                
+                # Create chart-compatible metadata
+                chart_metadata = signal.metadata.copy() if signal.metadata else {}
+                chart_metadata.update({
+                    'chart_price': price,
+                    'chart_reason': f"Confidence: {signal.confidence:.3f}, Strength: {signal.strength:.3f}",
+                    'chart_display_type': signal.signal_type.name.lower()  # 'buy', 'sell', 'hold'
+                })
+                
+                # Use the existing TradingSignal structure but add chart-specific metadata
+                chart_signal = TradingSignal(
                     symbol=signal.symbol,
-                    order_type=OrderType.MARKET,
-                    side=side,
-                    quantity=quantity,
-                    price=signal.price,
-                    size_usd=size_usd,
-                    reason=f"Signal: {signal.reason}"
+                    timestamp=signal.timestamp,
+                    signal_type=signal.signal_type,
+                    confidence=signal.confidence,
+                    strength=signal.strength,
+                    source=signal.source,
+                    metadata=chart_metadata
                 )
-                orders.append(order)
-        
-        return orders
-    
-    def generate_sample_portfolio(self, data: pd.DataFrame, orders: List[Order], 
-                                 initial_value: float = 100000) -> List[PortfolioSnapshot]:
-        """Generate sample portfolio performance"""
-        portfolio_snapshots = []
-        
-        current_value = initial_value
-        total_return = 0.0
-        
-        # Sample every 10 days
-        for i in range(0, len(data), 10):
-            timestamp = data.index[i]
-            
-            # Simulate portfolio growth (based on market performance)
-            if i > 0:
-                market_return = (data['Close'].iloc[i] / data['Close'].iloc[i-10] - 1)
-                portfolio_return = market_return * 0.8  # Slightly underperform market
-                daily_return = portfolio_return / 10  # Average daily return
+                chart_signals.append(chart_signal)
                 
-                new_value = current_value * (1 + portfolio_return)
-                daily_pnl = new_value - current_value
-                current_value = new_value
-                total_return = (current_value / initial_value - 1) * 100
-            else:
-                daily_return = 0.0
-                daily_pnl = 0.0
-            
-            # Simulate cash vs positions (assume 80% invested)
-            positions_value = current_value * 0.8
-            cash = current_value * 0.2
-            
-            snapshot = PortfolioSnapshot(
-                timestamp=timestamp,
-                total_value=current_value,
-                cash=cash,
-                positions_value=positions_value,
-                daily_pnl=daily_pnl,
-                total_pnl=current_value - initial_value,
-                daily_return=daily_return,
-                total_return=total_return
-            )
-            portfolio_snapshots.append(snapshot)
+            except Exception as e:
+                print(f"Warning: Failed to convert signal {signal}: {e}")
+                continue
         
-        return portfolio_snapshots
+        print(f"   Converted {len(chart_signals)} real signals for chart display")
+        return chart_signals
     
-    def create_comprehensive_chart(self, symbol: str, period: str = "6mo") -> str:
+    def create_comprehensive_chart(self, symbol: str, period: str = "6mo", 
+                                 real_signals: Optional[List] = None,
+                                 backtest_results: Optional[Dict] = None) -> str:
         """
         Create a comprehensive TradingView-style chart with all components
+        
+        Args:
+            symbol: Trading symbol
+            period: Time period for chart data
+            real_signals: Optional list of real trading signals to display
+            backtest_results: Optional backtest results with performance data
         
         Returns:
             Path to the saved chart file
@@ -344,11 +239,24 @@ class TradingViewChartGenerator:
         rsi = TechnicalIndicators.rsi(data['Close'])
         macd_line, signal_line, histogram = TechnicalIndicators.macd(data['Close'])
         
-        # Generate sample trading data
+        # Generate trading data
         print("🎯 Generating trading signals...")
-        signals = self.generate_sample_signals(data, symbol)
-        orders = self.generate_sample_orders(signals)
-        portfolio_snapshots = self.generate_sample_portfolio(data, orders)
+        if real_signals is not None:
+            print(f"   Using {len(real_signals)} real trading signals")
+            signals = self._convert_real_signals_to_chart_format(real_signals, data)
+        else:
+            print("   No real signals provided - chart will show price data only")
+            signals = []
+        
+        # Use real backtest data if available
+        if backtest_results is not None:
+            print("   Using real backtest results for orders and portfolio")
+            orders = self._extract_orders_from_backtest(backtest_results)
+            portfolio_snapshots = self._extract_portfolio_from_backtest(backtest_results, data)
+        else:
+            print("   No backtest results provided - chart will show basic portfolio tracking")
+            orders = []
+            portfolio_snapshots = []
         
         # Create subplots
         fig = make_subplots(
@@ -455,14 +363,45 @@ class TradingViewChartGenerator:
         )
         
         # 5. TRADING SIGNALS
-        buy_signals = [s for s in signals if s.signal_type == SignalType.BUY]
-        sell_signals = [s for s in signals if s.signal_type == SignalType.SELL]
+        buy_signals = []
+        sell_signals = []
+        
+        for s in signals:
+            # Handle both TradingSignal objects and dictionaries
+            if hasattr(s, 'signal_type'):
+                # TradingSignal object
+                if s.signal_type == MainSignalType.BUY:
+                    buy_signals.append(s)
+                elif s.signal_type == MainSignalType.SELL:
+                    sell_signals.append(s)
+            elif isinstance(s, dict):
+                # Dictionary format (legacy support)
+                signal_type = s.get('signal_type', '')
+                if 'BUY' in str(signal_type) or signal_type == 1:
+                    buy_signals.append(s)
+                elif 'SELL' in str(signal_type) or signal_type == -1:
+                    sell_signals.append(s)
         
         if buy_signals:
+            # Extract timestamps and prices safely
+            buy_timestamps = []
+            buy_prices = []
+            buy_texts = []
+            
+            for s in buy_signals:
+                if hasattr(s, 'timestamp'):
+                    buy_timestamps.append(s.timestamp)
+                    buy_prices.append(s.metadata.get('chart_price', 0.0))
+                    buy_texts.append(f"Buy: {s.confidence:.1%}<br>{s.metadata.get('chart_reason', '')}")
+                elif isinstance(s, dict):
+                    buy_timestamps.append(s.get('timestamp', pd.Timestamp.now()))
+                    buy_prices.append(s.get('price', 0.0))
+                    buy_texts.append(f"Buy: {s.get('confidence', 0.5):.1%}<br>{s.get('reason', '')}")
+            
             fig.add_trace(
                 go.Scatter(
-                    x=[s.timestamp for s in buy_signals],
-                    y=[s.price for s in buy_signals],
+                    x=buy_timestamps,
+                    y=buy_prices,
                     mode='markers',
                     name='Buy Signals',
                     marker=dict(
@@ -471,17 +410,32 @@ class TradingViewChartGenerator:
                         color=self.colors['green'],
                         line=dict(width=2, color='white')
                     ),
-                    text=[f"Buy: {s.confidence:.1%}<br>{s.reason}" for s in buy_signals],
+                    text=buy_texts,
                     textposition="top center"
                 ),
                 row=1, col=1
             )
         
         if sell_signals:
+            # Extract timestamps and prices safely
+            sell_timestamps = []
+            sell_prices = []
+            sell_texts = []
+            
+            for s in sell_signals:
+                if hasattr(s, 'timestamp'):
+                    sell_timestamps.append(s.timestamp)
+                    sell_prices.append(s.metadata.get('chart_price', 0.0))
+                    sell_texts.append(f"Sell: {s.confidence:.1%}<br>{s.metadata.get('chart_reason', '')}")
+                elif isinstance(s, dict):
+                    sell_timestamps.append(s.get('timestamp', pd.Timestamp.now()))
+                    sell_prices.append(s.get('price', 0.0))
+                    sell_texts.append(f"Sell: {s.get('confidence', 0.5):.1%}<br>{s.get('reason', '')}")
+            
             fig.add_trace(
                 go.Scatter(
-                    x=[s.timestamp for s in sell_signals],
-                    y=[s.price for s in sell_signals],
+                    x=sell_timestamps,
+                    y=sell_prices,
                     mode='markers',
                     name='Sell Signals',
                     marker=dict(
@@ -490,7 +444,7 @@ class TradingViewChartGenerator:
                         color=self.colors['red'],
                         line=dict(width=2, color='white')
                     ),
-                    text=[f"Sell: {s.confidence:.1%}<br>{s.reason}" for s in sell_signals],
+                    text=sell_texts,
                     textposition="bottom center"
                 ),
                 row=1, col=1
@@ -698,33 +652,69 @@ class TradingViewChartGenerator:
         print(f"📈 Chart saved: {filepath}")
         
         # Also save as PNG if kaleido is available
-        try:
-            png_filepath = filepath.replace('.html', '.png')
-            fig.write_image(png_filepath, width=1600, height=1200)
-            print(f"📸 PNG chart saved: {png_filepath}")
-        except Exception as e:
-            print(f"⚠️ Could not save PNG (install kaleido for PNG export): {e}")
+        # Temporarily disabled PNG generation due to hanging issues
+        # try:
+        #     png_filepath = filepath.replace('.html', '.png')
+        #     fig.write_image(png_filepath, width=1600, height=1200)
+        #     print(f"📸 PNG chart saved: {png_filepath}")
+        # except Exception as e:
+        #     print(f"⚠️ Could not save PNG (install kaleido for PNG export): {e}")
+        print("📸 PNG generation disabled to prevent hanging")
         
         return filepath
 
-
-# Example usage function
-def create_sample_charts(symbols: List[str] = None):
-    """Create sample charts for demonstration"""
-    if symbols is None:
-        symbols = ['AAPL', 'TSLA', 'MSFT']
+    def _extract_orders_from_backtest(self, backtest_results: Dict) -> List[Order]:
+        """Extract orders from backtest results"""
+        orders = []
+        if 'trades' in backtest_results:
+            for trade in backtest_results['trades']:
+                # Convert backtest trade to Order format
+                order = Order(
+                    timestamp=trade.get('entry_date', datetime.now()),
+                    symbol=trade.get('symbol', 'UNKNOWN'),
+                    action=trade.get('action', 'BUY'),
+                    quantity=trade.get('quantity', 100),
+                    price=trade.get('entry_price', 0.0),
+                    order_type='MARKET'
+                )
+                orders.append(order)
+        return orders
     
-    chart_generator = TradingViewChartGenerator()
-    
-    for symbol in symbols:
-        try:
-            print(f"\n🎨 Creating comprehensive chart for {symbol}...")
-            filepath = chart_generator.create_comprehensive_chart(symbol)
-            print(f"✅ Chart created successfully: {filepath}")
-        except Exception as e:
-            print(f"❌ Error creating chart for {symbol}: {e}")
+    def _extract_portfolio_from_backtest(self, backtest_results: Dict, data: pd.DataFrame) -> List[Dict]:
+        """Extract portfolio snapshots from backtest results"""
+        portfolio_snapshots = []
+        if 'portfolio_history' in backtest_results:
+            for snapshot in backtest_results['portfolio_history']:
+                portfolio_snapshots.append({
+                    'date': snapshot.get('date', datetime.now()),
+                    'value': snapshot.get('total_value', 100000),
+                    'cash': snapshot.get('cash', 100000),
+                    'positions': snapshot.get('positions', 0)
+                })
+        else:
+            # Generate basic portfolio performance if no detailed history
+            performance = backtest_results.get('performance', {})
+            initial_value = 100000
+            final_return = performance.get('total_return', 0.0)
+            final_value = initial_value * (1 + final_return)
+            
+            # Create simple linear progression
+            for i, date in enumerate(data.index[-30:]):  # Last 30 days
+                progress = i / 29.0 if len(data.index[-30:]) > 1 else 1.0
+                current_value = initial_value + (final_value - initial_value) * progress
+                portfolio_snapshots.append({
+                    'date': date,
+                    'value': current_value,
+                    'cash': current_value * 0.1,  # Assume 10% cash
+                    'positions': current_value * 0.9
+                })
+        
+        return portfolio_snapshots
 
 
 if __name__ == "__main__":
-    # Create sample charts
-    create_sample_charts(['AAPL'])
+    # Example usage: python tradingview_charts.py
+    print("TradingView Chart Generator")
+    print("Import this module to use chart generation functionality")
+    print("Example: chart_generator = TradingViewChartGenerator()")
+    print("         chart_path = chart_generator.create_comprehensive_chart('AAPL')")

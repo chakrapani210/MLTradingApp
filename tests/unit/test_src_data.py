@@ -19,7 +19,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from src.data.providers import YFinanceProvider
 from src.data.preprocessors import DataPreprocessor, TechnicalIndicatorCalculator
-from src.data.analyzers import MarketDataAnalyzer
+from src.analysis.enhanced_market_analysis import MarketContextAnalyzer
 
 
 class TestYFinanceProvider(unittest.TestCase):
@@ -420,7 +420,7 @@ class TestMarketDataAnalyzer(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures"""
-        self.analyzer = MarketDataAnalyzer()
+        self.analyzer = MarketContextAnalyzer()
         
     def test_analyze_price_action(self):
         """Test price action analysis"""

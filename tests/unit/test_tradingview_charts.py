@@ -19,13 +19,15 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 from tradingview_charts import (
     TradingViewChartGenerator,
     TechnicalIndicators,
-    TradingSignal,
     Order,
     PortfolioSnapshot,
     SignalType,
     OrderType,
     create_sample_charts
 )
+
+# Import the main TradingSignal from interfaces
+from src.interfaces.signal_generator import TradingSignal, SignalType as MainSignalType
 
 
 class TestSignalType(unittest.TestCase):
@@ -54,24 +56,29 @@ class TestTradingSignal(unittest.TestCase):
     
     def test_trading_signal_creation(self):
         """Test TradingSignal creation and attributes"""
-        timestamp = datetime.now()
+        timestamp = pd.Timestamp.now()
         signal = TradingSignal(
-            timestamp=timestamp,
             symbol="AAPL",
-            signal_type=SignalType.BUY,
+            timestamp=timestamp,
+            signal_type=MainSignalType.BUY,
             confidence=0.85,
-            price=150.0,
+            strength=0.75,
             source="RSI_Strategy",
-            reason="RSI oversold"
+            metadata={
+                'chart_price': 150.0,
+                'chart_reason': "RSI oversold",
+                'rsi_value': 25.0
+            }
         )
         
         self.assertEqual(signal.timestamp, timestamp)
         self.assertEqual(signal.symbol, "AAPL")
-        self.assertEqual(signal.signal_type, SignalType.BUY)
+        self.assertEqual(signal.signal_type, MainSignalType.BUY)
         self.assertEqual(signal.confidence, 0.85)
-        self.assertEqual(signal.price, 150.0)
+        self.assertEqual(signal.strength, 0.75)
         self.assertEqual(signal.source, "RSI_Strategy")
-        self.assertEqual(signal.reason, "RSI oversold")
+        self.assertEqual(signal.metadata['chart_price'], 150.0)
+        self.assertEqual(signal.metadata['chart_reason'], "RSI oversold")
 
 
 class TestOrder(unittest.TestCase):
@@ -336,22 +343,28 @@ class TestTradingViewChartGenerator(unittest.TestCase):
         # Create sample signals
         signals = [
             TradingSignal(
-                timestamp=datetime.now(),
                 symbol="AAPL",
-                signal_type=SignalType.BUY,
+                timestamp=pd.Timestamp.now(),
+                signal_type=MainSignalType.BUY,
                 confidence=0.8,
-                price=150.0,
+                strength=0.75,
                 source="Test",
-                reason="Test signal"
+                metadata={
+                    'chart_price': 150.0,
+                    'chart_reason': "Test signal"
+                }
             ),
             TradingSignal(
-                timestamp=datetime.now(),
                 symbol="AAPL",
-                signal_type=SignalType.SELL,
+                timestamp=pd.Timestamp.now(),
+                signal_type=MainSignalType.SELL,
                 confidence=0.7,
-                price=155.0,
+                strength=0.65,
                 source="Test",
-                reason="Test signal"
+                metadata={
+                    'chart_price': 155.0,
+                    'chart_reason': "Test signal"
+                }
             )
         ]
         
@@ -373,13 +386,16 @@ class TestTradingViewChartGenerator(unittest.TestCase):
         """Test that low confidence signals don't generate orders"""
         signals = [
             TradingSignal(
-                timestamp=datetime.now(),
                 symbol="AAPL",
-                signal_type=SignalType.BUY,
+                timestamp=pd.Timestamp.now(),
+                signal_type=MainSignalType.BUY,
                 confidence=0.3,  # Below threshold
-                price=150.0,
+                strength=0.25,
                 source="Test",
-                reason="Test signal"
+                metadata={
+                    'chart_price': 150.0,
+                    'chart_reason': "Test signal"
+                }
             )
         ]
         
