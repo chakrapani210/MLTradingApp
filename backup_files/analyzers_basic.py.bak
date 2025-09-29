@@ -1,0 +1,349 @@
+"""
+Data Analyzers
+Market analysis and feature engineering tools
+"""
+
+import pandas as pd
+import numpy as np
+from typing import Dict, Any, List, Tuple, Optional
+import datetime as dt
+from scipy import stats
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class MarketAnalyzer:
+    """
+    Market data analyzer for correlation and context analysis
+    """
+    
+    def __init__(self, config: Dict[str, Any] = None):
+        """
+        Initialize market analyzer
+        
+        Args:
+            config: Analyzer configuration
+        """
+        self.config = config or {}
+        self.benchmark_symbols = self.config.get('benchmark_symbols', ['SPY', 'QQQ', 'IWM'])
+        
+    def analyze_market_context(self, symbol: str, 
+                             symbol_data: pd.DataFrame,
+                             market_data: Dict[str, pd.DataFrame],
+                             start_date: dt.datetime,
+                             end_date: dt.datetime) -> Dict[str, Any]:
+        """
+        Analyze market context for a symbol
+        
+        Args:
+            symbol: Target symbol
+            symbol_data: Price data for target symbol
+            market_data: Market data for benchmark symbols
+            start_date: Analysis start date
+            end_date: Analysis end date
+            
+        Returns:
+            Market context analysis results
+        """
+        try:
+            # Filter data by date range
+            mask = (symbol_data.index >= start_date) & (symbol_data.index <= end_date)
+            symbol_returns = symbol_data.loc[mask, 'close'].pct_change().dropna()
+            
+            context = {
+                'symbol': symbol,
+                'period': {
+                    'start': start_date.isoformat(),
+                    'end': end_date.isoformat(),
+                    'days': len(symbol_returns)
+                },
+                'symbol_stats': self._calculate_return_stats(symbol_returns),
+                'market_correlations': {},
+                'relative_performance': {}
+            }
+            
+            # Analyze correlations with benchmarks
+            for bench_symbol in self.benchmark_symbols:
+                if bench_symbol in market_data:
+                    bench_data = market_data[bench_symbol]
+                    bench_mask = (bench_data.index >= start_date) & (bench_data.index <= end_date)
+                    bench_returns = bench_data.loc[bench_mask, 'close'].pct_change().dropna()
+                    
+                    # Align data
+                    aligned_data = pd.concat([symbol_returns, bench_returns], axis=1, join='inner')
+                    aligned_data.columns = [symbol, bench_symbol]
+                    aligned_data.dropna(inplace=True)
+                    
+                    if len(aligned_data) > 20:  # Minimum data points for correlation
+                        correlation = aligned_data[symbol].corr(aligned_data[bench_symbol])
+                        beta = self._calculate_beta(aligned_data[symbol], aligned_data[bench_symbol])
+                        
+                        # Calculate relative performance
+                        symbol_total_return = (1 + aligned_data[symbol]).prod() - 1
+                        bench_total_return = (1 + aligned_data[bench_symbol]).prod() - 1
+                        relative_return = symbol_total_return - bench_total_return
+                        
+                        context['market_correlations'][bench_symbol] = {
+                            'correlation': correlation,
+                            'beta': beta,
+                            'data_points': len(aligned_data)
+                        }
+                        
+                        context['relative_performance'][bench_symbol] = {
+                            'symbol_return': symbol_total_return,
+                            'benchmark_return': bench_total_return,
+                            'relative_return': relative_return,
+                            'outperformed': relative_return > 0
+                        }
+            
+            logger.info(f"Market context analysis completed for {symbol}")
+            return context
+            
+        except Exception as e:
+            logger.error(f"Error in market context analysis for {symbol}: {str(e)}")
+            return {'error': str(e)}
+    
+    def _calculate_return_stats(self, returns: pd.Series) -> Dict[str, float]:
+        """Calculate return statistics"""
+        return {
+            'mean_return': returns.mean(),
+            'volatility': returns.std(),
+            'skewness': stats.skew(returns.dropna()),
+            'kurtosis': stats.kurtosis(returns.dropna()),
+            'min_return': returns.min(),
+            'max_return': returns.max(),
+            'total_return': (1 + returns).prod() - 1,
+            'sharpe_ratio': returns.mean() / returns.std() if returns.std() > 0 else 0
+        }
+    
+    def _calculate_beta(self, symbol_returns: pd.Series, market_returns: pd.Series) -> float:
+        """Calculate beta coefficient"""
+        try:
+            covariance = np.cov(symbol_returns, market_returns)[0][1]
+            market_variance = np.var(market_returns)
+            return covariance / market_variance if market_variance > 0 else 0
+        except Exception:
+            return 0.0
+
+
+class CorrelationAnalyzer:
+    """
+    Correlation analysis between symbols and market factors
+    """
+    
+    def __init__(self, config: Dict[str, Any] = None):
+        """
+        Initialize correlation analyzer
+        
+        Args:
+            config: Analyzer configuration
+        """
+        self.config = config or {}
+        self.lookback_periods = self.config.get('lookback_periods', [20, 60, 120])
+    
+    def calculate_rolling_correlations(self, symbol_data: pd.DataFrame,
+                                     market_data: Dict[str, pd.DataFrame],
+                                     target_symbols: List[str]) -> pd.DataFrame:
+        """
+        Calculate rolling correlations between symbol and market factors
+        
+        Args:
+            symbol_data: Primary symbol data
+            market_data: Market data dictionary
+            target_symbols: Symbols to correlate against
+            
+        Returns:
+            DataFrame with rolling correlations
+        """
+        try:
+            symbol_returns = symbol_data['close'].pct_change().dropna()
+            correlation_data = pd.DataFrame(index=symbol_data.index)
+            
+            for target_symbol in target_symbols:
+                if target_symbol in market_data:
+                    target_returns = market_data[target_symbol]['close'].pct_change().dropna()
+                    
+                    # Align data
+                    aligned_data = pd.concat([symbol_returns, target_returns], axis=1, join='inner')
+                    aligned_data.columns = ['symbol', 'target']
+                    
+                    # Calculate rolling correlations for different periods
+                    for period in self.lookback_periods:
+                        col_name = f'corr_{target_symbol}_{period}d'
+                        rolling_corr = aligned_data['symbol'].rolling(window=period).corr(aligned_data['target'])
+                        correlation_data = correlation_data.join(rolling_corr.rename(col_name), how='left')
+            
+            return correlation_data.fillna(0)
+            
+        except Exception as e:
+            logger.error(f"Error calculating rolling correlations: {str(e)}")
+            return pd.DataFrame()
+    
+    def get_correlation_matrix(self, market_data: Dict[str, pd.DataFrame],
+                              symbols: List[str],
+                              lookback_days: int = 60) -> pd.DataFrame:
+        """
+        Get correlation matrix for multiple symbols
+        
+        Args:
+            market_data: Market data dictionary
+            symbols: List of symbols to include
+            lookback_days: Number of days for correlation calculation
+            
+        Returns:
+            Correlation matrix DataFrame
+        """
+        try:
+            returns_data = pd.DataFrame()
+            
+            for symbol in symbols:
+                if symbol in market_data:
+                    returns = market_data[symbol]['close'].pct_change().dropna()
+                    returns_data[symbol] = returns
+            
+            if returns_data.empty:
+                return pd.DataFrame()
+            
+            # Calculate correlation matrix using recent data
+            recent_data = returns_data.tail(lookback_days)
+            correlation_matrix = recent_data.corr()
+            
+            return correlation_matrix
+            
+        except Exception as e:
+            logger.error(f"Error creating correlation matrix: {str(e)}")
+            return pd.DataFrame()
+
+
+class FeatureEngineer:
+    """
+    Feature engineering for ML models
+    """
+    
+    def __init__(self, config: Dict[str, Any] = None):
+        """
+        Initialize feature engineer
+        
+        Args:
+            config: Feature engineering configuration
+        """
+        self.config = config or {}
+        self.scaler = StandardScaler()
+        self.feature_names = []
+    
+    def create_enhanced_features(self, symbol_data: pd.DataFrame,
+                               market_data: Dict[str, pd.DataFrame],
+                               technical_indicators: pd.DataFrame) -> pd.DataFrame:
+        """
+        Create enhanced feature set for ML models
+        
+        Args:
+            symbol_data: Primary symbol price data
+            market_data: Market benchmark data
+            technical_indicators: Technical indicator data
+            
+        Returns:
+            Enhanced feature DataFrame
+        """
+        try:
+            features = pd.DataFrame(index=symbol_data.index)
+            
+            # Price-based features
+            features['price_return'] = symbol_data['close'].pct_change()
+            features['price_volatility'] = features['price_return'].rolling(20).std()
+            features['price_momentum'] = symbol_data['close'] / symbol_data['close'].shift(10) - 1
+            
+            # Volume-based features
+            features['volume_ratio'] = symbol_data['volume'] / symbol_data['volume'].rolling(20).mean()
+            features['volume_change'] = symbol_data['volume'].pct_change()
+            
+            # Market context features
+            benchmark_symbols = ['SPY', 'QQQ']
+            for benchmark in benchmark_symbols:
+                if benchmark in market_data:
+                    bench_returns = market_data[benchmark]['close'].pct_change()
+                    features[f'{benchmark.lower()}_return'] = bench_returns
+                    features[f'{benchmark.lower()}_correlation'] = features['price_return'].rolling(60).corr(bench_returns)
+                    
+                    # Beta calculation
+                    features[f'beta_{benchmark.lower()}'] = self._calculate_rolling_beta(
+                        features['price_return'], bench_returns, window=60
+                    )
+            
+            # Technical indicator features
+            if not technical_indicators.empty:
+                # Merge technical indicators
+                features = features.join(technical_indicators, how='left')
+            
+            # Lag features
+            lag_columns = ['price_return', 'volume_ratio']
+            for col in lag_columns:
+                if col in features.columns:
+                    for lag in [1, 2, 5]:
+                        features[f'{col}_lag_{lag}'] = features[col].shift(lag)
+            
+            # Fill NaN values
+            features = features.fillna(method='forward').fillna(0)
+            
+            # Store feature names
+            self.feature_names = list(features.columns)
+            
+            logger.info(f"Created {len(self.feature_names)} enhanced features")
+            return features
+            
+        except Exception as e:
+            logger.error(f"Error creating enhanced features: {str(e)}")
+            return pd.DataFrame()
+    
+    def _calculate_rolling_beta(self, symbol_returns: pd.Series, 
+                              market_returns: pd.Series, window: int) -> pd.Series:
+        """Calculate rolling beta coefficient"""
+        try:
+            aligned_data = pd.concat([symbol_returns, market_returns], axis=1, join='inner')
+            aligned_data.columns = ['symbol', 'market']
+            aligned_data.dropna(inplace=True)
+            
+            def rolling_beta(data):
+                if len(data) < 10:  # Minimum data points
+                    return np.nan
+                covariance = np.cov(data['symbol'], data['market'])[0][1]
+                market_variance = np.var(data['market'])
+                return covariance / market_variance if market_variance > 0 else 0
+            
+            return aligned_data.rolling(window=window).apply(rolling_beta, raw=False)['symbol']
+            
+        except Exception:
+            return pd.Series(index=symbol_returns.index, dtype=float)
+    
+    def normalize_features(self, features: pd.DataFrame, 
+                          fit_scaler: bool = True) -> pd.DataFrame:
+        """
+        Normalize features using StandardScaler
+        
+        Args:
+            features: Feature DataFrame
+            fit_scaler: Whether to fit the scaler (True for training, False for prediction)
+            
+        Returns:
+            Normalized feature DataFrame
+        """
+        try:
+            if features.empty:
+                return features
+            
+            if fit_scaler:
+                normalized_data = self.scaler.fit_transform(features)
+            else:
+                normalized_data = self.scaler.transform(features)
+            
+            return pd.DataFrame(
+                normalized_data,
+                index=features.index,
+                columns=features.columns
+            )
+            
+        except Exception as e:
+            logger.error(f"Error normalizing features: {str(e)}")
+            return features

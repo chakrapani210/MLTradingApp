@@ -55,6 +55,18 @@ class ModelMetadata:
         }
 
 
+@dataclass
+class PredictionResult:
+    """
+    Standardized prediction result structure
+    """
+    predictions: np.ndarray
+    confidence: float
+    model_version: str
+    feature_importance: Optional[Dict[str, float]] = None
+    prediction_metadata: Optional[Dict[str, Any]] = None
+
+
 class ModelManagerInterface(ABC):
     """
     Abstract base class for ML model management

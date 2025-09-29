@@ -92,9 +92,15 @@ class TechnicalIndicators:
     def rsi(data: pd.Series, window: int = 14) -> pd.Series:
         """Relative Strength Index"""
         delta = data.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-        rs = gain / loss
+        gain = delta.where(delta > 0, 0.0)  # Use 0.0 instead of 0
+        loss = -delta.where(delta < 0, 0.0)  # Use 0.0 instead of 0
+        
+        # Use rolling mean with min_periods to handle edge cases
+        avg_gain = gain.rolling(window=window, min_periods=1).mean()
+        avg_loss = loss.rolling(window=window, min_periods=1).mean()
+        
+        # Avoid division by zero
+        rs = avg_gain / avg_loss.replace(0, np.nan)
         rsi = 100 - (100 / (1 + rs))
         return rsi
     
@@ -111,14 +117,24 @@ class TechnicalIndicators:
     @staticmethod
     def volume_profile(prices: pd.Series, volumes: pd.Series, bins: int = 20) -> Tuple[np.ndarray, np.ndarray]:
         """Volume Profile"""
-        price_min, price_max = prices.min(), prices.max()
+        if len(prices) == 0 or len(volumes) == 0:
+            return np.array([]), np.array([])
+        
+        price_min, price_max = float(prices.min()), float(prices.max())
+        
+        # Handle edge case where all prices are the same
+        if price_min == price_max:
+            price_levels = np.array([price_min])
+            volume_profile = np.array([float(volumes.sum())])
+            return price_levels, volume_profile
+        
         price_bins = np.linspace(price_min, price_max, bins + 1)
         volume_profile = np.zeros(bins)
         
         for i in range(len(prices)):
-            bin_idx = np.digitize(prices.iloc[i], price_bins) - 1
+            bin_idx = np.digitize(float(prices.iloc[i]), price_bins) - 1
             bin_idx = max(0, min(bins - 1, bin_idx))
-            volume_profile[bin_idx] += volumes.iloc[i]
+            volume_profile[bin_idx] += float(volumes.iloc[i])
         
         price_levels = (price_bins[:-1] + price_bins[1:]) / 2
         return price_levels, volume_profile
@@ -131,8 +147,8 @@ class TradingViewChartGenerator:
     
     def __init__(self, results_dir: str = "results"):
         """Initialize the chart generator"""
-        self.results_dir = results_dir
-        os.makedirs(results_dir, exist_ok=True)
+        self.results_dir = results_dir or "results"  # Handle None case
+        os.makedirs(self.results_dir, exist_ok=True)
         
         # Color scheme (TradingView dark theme inspired)
         self.colors = {
@@ -184,10 +200,16 @@ class TradingViewChartGenerator:
         data = pd.DataFrame(index=dates)
         data['Close'] = prices
         
-        # Generate OHLC from close prices
-        data['Open'] = data['Close'].shift(1).fillna(prices[0])
-        data['High'] = np.maximum(data['Open'], data['Close']) * np.random.uniform(1.000, 1.020, len(data))
-        data['Low'] = np.minimum(data['Open'], data['Close']) * np.random.uniform(0.980, 1.000, len(data))
+        # Generate OHLC from close prices with better error handling
+        data['Open'] = data['Close'].shift(1)
+        data['Open'].iloc[0] = prices[0]  # Set first value explicitly
+        
+        # Create arrays for vectorized operations
+        high_multiplier = np.random.uniform(1.000, 1.020, len(data))
+        low_multiplier = np.random.uniform(0.980, 1.000, len(data))
+        
+        data['High'] = np.maximum(data['Open'].values, data['Close'].values) * high_multiplier
+        data['Low'] = np.minimum(data['Open'].values, data['Close'].values) * low_multiplier
         data['Volume'] = volumes
         
         return data

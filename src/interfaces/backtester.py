@@ -97,6 +97,10 @@ class BacktestResults:
         }
 
 
+# Alias for backward compatibility
+BacktestResult = BacktestResults
+
+
 class Backtester(ABC):
     """
     Abstract base class for backtesting engines

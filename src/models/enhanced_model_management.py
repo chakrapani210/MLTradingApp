@@ -650,6 +650,96 @@ class EnhancedModelManager(ModelManagerInterface):
             return obj.tolist()
         else:
             return str(obj)
+    
+    def get_latest_version(self, symbol: str) -> Optional[str]:
+        """
+        Get the latest version for a symbol
+        
+        Args:
+            symbol: Trading symbol
+            
+        Returns:
+            Latest version string or None if no model exists
+        """
+        try:
+            return self._get_latest_version(symbol)
+        except FileNotFoundError:
+            return None
+    
+    def model_exists(self, symbol: str, version: Optional[str] = None) -> bool:
+        """
+        Check if model exists for symbol and version
+        
+        Args:
+            symbol: Trading symbol
+            version: Model version (if None, checks latest)
+            
+        Returns:
+            True if model exists, False otherwise
+        """
+        try:
+            metadata = self.get_model_metadata(symbol, version)
+            return metadata is not None
+        except Exception:
+            return False
+    
+    def validate_model(self, symbol: str, version: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Validate model integrity and performance
+        
+        Args:
+            symbol: Trading symbol
+            version: Model version (if None, validates latest)
+            
+        Returns:
+            Validation results dictionary
+        """
+        try:
+            metadata = self.get_model_metadata(symbol, version)
+            if metadata:
+                return {
+                    'valid': True,
+                    'symbol': symbol,
+                    'version': metadata.version,
+                    'status': metadata.status.value,
+                    'performance_metrics': metadata.performance_metrics,
+                    'model_type': metadata.model_type
+                }
+            else:
+                return {'valid': False, 'error': 'Model not found'}
+        except Exception as e:
+            return {'valid': False, 'error': str(e)}
+    
+    def cleanup_old_versions(self, symbol: str, keep_versions: int = 5) -> int:
+        """
+        Clean up old model versions
+        
+        Args:
+            symbol: Trading symbol
+            keep_versions: Number of versions to keep
+            
+        Returns:
+            Number of models deleted
+        """
+        try:
+            models = self.list_models(symbol)
+            if len(models) <= keep_versions:
+                return 0
+            
+            # Sort by version number (keep latest)
+            models_sorted = sorted(models, key=lambda m: int(m.version), reverse=True)
+            models_to_delete = models_sorted[keep_versions:]
+            
+            deleted_count = 0
+            for model in models_to_delete:
+                if self.delete_model(symbol, model.version):
+                    deleted_count += 1
+            
+            return deleted_count
+            
+        except Exception as e:
+            print(f"[WARNING] Failed to cleanup old versions for {symbol}: {e}")
+            return 0
 
 
 class MLSignalGenerator(SignalGenerator):

@@ -20,6 +20,7 @@ from .interfaces.backtester import Backtester
 
 # Enhanced implementations
 from .data.providers import YFinanceProvider
+from .data.preprocessors import DataPreprocessor, TechnicalIndicatorCalculator
 from .trading.enhanced_strategies import (
     EnhancedMLTradingStrategy, 
     AutoOrderSizeManager, 
@@ -41,18 +42,23 @@ from .signals.technical import RSISignalGenerator, MACDSignalGenerator, Bollinge
 warnings.filterwarnings('ignore')
 
 
-class EnhancedTradingSystemOrchestrator:
+class ProductionTradingOrchestrator:
     """
-    Enhanced Trading System Orchestrator
+    Production-Ready Trading System Orchestrator
     
-    Implements all features from enhanced_strategy.py:
-    - Intelligent order sizing with 5 strategies
-    - Golden Cross and Short-term pattern analysis
-    - Enhanced ML models with comprehensive management
-    - Market context analysis with correlations and beta
-    - 40+ technical indicators using TA-Lib
+    Modular architecture with layered components:
+    - Data Layer: Data acquisition, preprocessing, indicators
+    - Analysis Layer: Market context, feature engineering
+    - Model Layer: ML model management and training
+    - Trading Layer: Strategy execution, backtesting
+    - Visualization Layer: Chart generation and analysis
+    
+    Features:
+    - Enhanced market context analysis with regime detection
+    - 40+ TA-Lib technical indicators
+    - ML-ready feature engineering pipeline
     - Comprehensive backtesting with risk metrics
-    - Performance analytics and reporting
+    - Modular, testable, production-ready architecture
     """
     
     def __init__(self, 
@@ -88,31 +94,65 @@ class EnhancedTradingSystemOrchestrator:
         
         print(f"[SYSTEM] Enhanced Trading System initialized successfully")
     
-    def _initialize_components(self, models_path: str):
-        """Initialize all system components"""
-        # Data provider
+    def _initialize_data_layer(self):
+        """Initialize data layer components"""
         self.data_provider = YFinanceProvider()
-        
-        # Model management
+        self.data_preprocessor = DataPreprocessor()
+        self.indicator_calculator = TechnicalIndicatorCalculator()
+        print(f"[INIT] Data layer initialized")
+    
+    def _initialize_analysis_layer(self):
+        """Initialize analysis layer components"""
+        self.market_analyzer = MarketContextAnalyzer(data_provider=self.data_provider)
+        self.feature_engineer = EnhancedFeatureEngineer(market_analyzer=self.market_analyzer)
+        print(f"[INIT] Analysis layer initialized")
+    
+    def _initialize_model_layer(self, models_path: str):
+        """Initialize ML model layer components"""
         self.model_manager = EnhancedModelManager(base_path=models_path)
         self.model_training_service = ModelTrainingService(
             model_manager=self.model_manager,
             data_provider=self.data_provider
         )
-        
-        # Market analysis
-        self.market_analyzer = MarketContextAnalyzer(data_provider=self.data_provider)
-        self.feature_engineer = EnhancedFeatureEngineer(market_analyzer=self.market_analyzer)
-        
-        # Backtesting
+        print(f"[INIT] Model layer initialized")
+    
+    def _initialize_trading_layer(self):
+        """Initialize trading layer components"""
         self.backtester = EnhancedBacktester(
             data_provider=self.data_provider,
             initial_cash=self.starting_capital,
             commission_rate=self.commission_rate,
             slippage_rate=self.slippage_rate
         )
+        print(f"[INIT] Trading layer initialized")
+    
+    def _initialize_visualization_layer(self):
+        """Initialize visualization layer components"""
+        try:
+            from src.tradingview_charts import TradingViewChartGenerator
+            self.chart_generator = TradingViewChartGenerator()
+            print(f"[INIT] Visualization layer initialized")
+        except ImportError:
+            try:
+                from tradingview_charts import TradingViewChartGenerator
+                self.chart_generator = TradingViewChartGenerator()
+                print(f"[INIT] Visualization layer initialized")
+            except ImportError:
+                self.chart_generator = None
+                print(f"[INIT] Visualization layer initialized (chart generator not available)")
+    
+    def _initialize_components(self, models_path: str):
+        """Initialize all system components in modular layers"""
+        print(f"[INIT] Initializing Enhanced Trading System Components...")
         
-        print(f"[INIT] All system components initialized")
+        # Initialize components in dependency order
+        self._initialize_data_layer()
+        self._initialize_analysis_layer() 
+        self._initialize_model_layer(models_path)
+        self._initialize_trading_layer()
+        self._initialize_visualization_layer()
+        
+        print(f"[INIT] All production-ready components initialized successfully")
     
     def create_enhanced_strategy(self, 
                                 symbol: str,
@@ -314,6 +354,8 @@ class EnhancedTradingSystemOrchestrator:
         """
         Run comprehensive backtest with all features
         
+        This method delegates to the simulation package for clean separation.
+        
         Args:
             symbol: Trading symbol
             backtest_period_months: Backtest period in months
@@ -323,79 +365,14 @@ class EnhancedTradingSystemOrchestrator:
         Returns:
             Comprehensive backtest results
         """
-        print(f"[BACKTEST] Running comprehensive backtest for {symbol}")
-        
-        # Get strategy
-        if symbol not in self.strategies:
-            print(f"[BACKTEST] Creating default strategy for {symbol}")
-            self.create_enhanced_strategy(symbol)
-        
-        strategy = self.strategies[symbol]
-        
-        # Calculate backtest period
-        end_date = dt.datetime.now()
-        start_date = end_date - dt.timedelta(days=backtest_period_months * 30)
-        
-        try:
-            # Run backtest
-            backtest_result = self.backtester.run_backtest(
-                strategy=strategy,
-                symbols=[symbol],
-                start_date=start_date,
-                end_date=end_date,
-                benchmark_symbol=benchmark_symbol,
-                rebalance_frequency=rebalance_frequency
-            )
-            
-            # Store results
-            self.performance_history[symbol] = backtest_result
-            
-            # Create comprehensive results
-            comprehensive_results = {
-                'symbol': symbol,
-                'backtest_period': f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}",
-                'strategy_type': type(strategy).__name__,
-                'performance': {
-                    'total_return': backtest_result.total_return,
-                    'annualized_return': backtest_result.performance_metrics.annualized_return,
-                    'sharpe_ratio': backtest_result.sharpe_ratio,
-                    'max_drawdown': backtest_result.max_drawdown,
-                    'volatility': backtest_result.performance_metrics.volatility,
-                    'alpha': backtest_result.performance_metrics.alpha,
-                    'beta': backtest_result.performance_metrics.beta
-                },
-                'trading_metrics': {
-                    'total_trades': backtest_result.performance_metrics.total_trades,
-                    'win_rate': backtest_result.performance_metrics.win_rate,
-                    'profit_factor': backtest_result.performance_metrics.profit_factor,
-                    'avg_win': backtest_result.performance_metrics.avg_win,
-                    'avg_loss': backtest_result.performance_metrics.avg_loss
-                },
-                'risk_metrics': {
-                    'sortino_ratio': backtest_result.performance_metrics.sortino_ratio,
-                    'calmar_ratio': backtest_result.performance_metrics.calmar_ratio,
-                    'value_at_risk': backtest_result.performance_metrics.value_at_risk,
-                    'information_ratio': backtest_result.performance_metrics.information_ratio
-                },
-                'benchmark_comparison': {
-                    'benchmark_symbol': benchmark_symbol,
-                    'benchmark_return': backtest_result.performance_metrics.benchmark_return,
-                    'outperformance': backtest_result.total_return - backtest_result.performance_metrics.benchmark_return
-                },
-                'order_sizing_analysis': self._analyze_order_sizing_performance(strategy),
-                'signal_analysis': self._analyze_signal_performance(backtest_result)
-            }
-            
-            print(f"[BACKTEST] Backtest completed for {symbol}")
-            print(f"           Total Return: {backtest_result.total_return:.1%}")
-            print(f"           Sharpe Ratio: {backtest_result.sharpe_ratio:.3f}")
-            print(f"           Total Trades: {backtest_result.performance_metrics.total_trades}")
-            
-            return comprehensive_results
-            
-        except Exception as e:
-            print(f"[BACKTEST] Backtest failed for {symbol}: {e}")
-            return {'success': False, 'error': str(e)}
+        from .simulation.enhanced_backtesting_runner import EnhancedBacktestingRunner
+        backtest_runner = EnhancedBacktestingRunner(self)
+        return backtest_runner.run_comprehensive_backtest(
+            symbol=symbol,
+            backtest_period_months=backtest_period_months,
+            benchmark_symbol=benchmark_symbol,
+            rebalance_frequency=rebalance_frequency
+        )
     
     def run_complete_enhanced_simulation(self, 
                                        symbol: str,
@@ -404,7 +381,9 @@ class EnhancedTradingSystemOrchestrator:
                                        force_retrain_ml: bool = False,
                                        include_market_analysis: bool = True) -> Dict[str, Any]:
         """
-        Run complete enhanced simulation with all features (equivalent to enhanced_strategy.py)
+        Run complete enhanced simulation with all features
+        
+        This method delegates to the simulation package for clean separation.
         
         Args:
             symbol: Trading symbol
@@ -416,81 +395,15 @@ class EnhancedTradingSystemOrchestrator:
         Returns:
             Complete simulation results with all features
         """
-        print(f"\n{'='*80}")
-        print(f"[SIMULATION] ENHANCED TRADING SIMULATION - {symbol}")
-        print(f"{'='*80}")
-        
-        simulation_results = {
-            'symbol': symbol,
-            'simulation_start': dt.datetime.now().isoformat(),
-            'configuration': {
-                'simulation_months': simulation_months,
-                'order_sizing_strategy': order_sizing_strategy,
-                'force_retrain_ml': force_retrain_ml,
-                'include_market_analysis': include_market_analysis,
-                'starting_capital': self.starting_capital
-            }
-        }
-        
-        try:
-            # 1. Create Enhanced Strategy
-            print(f"\n[STEP 1] Creating Enhanced Trading Strategy")
-            strategy = self.create_enhanced_strategy(
-                symbol=symbol,
-                order_sizing_strategy=order_sizing_strategy,
-                golden_cross_enabled=True,
-                short_term_patterns_enabled=True
-            )
-            simulation_results['strategy_created'] = True
-            
-            # 2. Train ML Model
-            print(f"\n[STEP 2] Training ML Model")
-            ml_results = self.train_ml_model(
-                symbol=symbol,
-                algorithm='RandomForest',
-                force_retrain=force_retrain_ml
-            )
-            simulation_results['ml_training'] = ml_results
-            
-            # 3. Market Context Analysis
-            if include_market_analysis:
-                print(f"\n[STEP 3] Market Context Analysis")
-                market_analysis = self.analyze_market_context(
-                    symbol=symbol,
-                    analysis_period_days=365
-                )
-                simulation_results['market_analysis'] = market_analysis
-            
-            # 4. Comprehensive Backtesting
-            print(f"\n[STEP 4] Comprehensive Backtesting")
-            backtest_results = self.run_comprehensive_backtest(
-                symbol=symbol,
-                backtest_period_months=simulation_months,
-                benchmark_symbol='SPY'
-            )
-            simulation_results['backtest_results'] = backtest_results
-            
-            # 5. Performance Summary
-            print(f"\n[STEP 5] Generating Performance Summary")
-            performance_summary = self._generate_performance_summary(
-                symbol, ml_results, market_analysis if include_market_analysis else None, backtest_results
-            )
-            simulation_results['performance_summary'] = performance_summary
-            
-            # Mark simulation as successful
-            simulation_results['success'] = True
-            simulation_results['simulation_end'] = dt.datetime.now().isoformat()
-            
-            # Print final summary
-            self._print_enhanced_simulation_summary(simulation_results)
-            
-            return simulation_results
-            
-        except Exception as e:
-            print(f"\n[ERROR] Simulation failed for {symbol}: {e}")
-            simulation_results['success'] = False
-            simulation_results['error'] = str(e)
-            return simulation_results
+        from .simulation.enhanced_simulation import EnhancedTradingSimulator
+        simulator = EnhancedTradingSimulator(self)
+        return simulator.run_complete_enhanced_simulation(
+            symbol=symbol,
+            simulation_months=simulation_months,
+            order_sizing_strategy=order_sizing_strategy,
+            force_retrain_ml=force_retrain_ml,
+            include_market_analysis=include_market_analysis
+        )
     
     def _categorize_features(self, feature_names: List[str]) -> Dict[str, int]:
         """Categorize features by type"""
@@ -517,190 +430,209 @@ class EnhancedTradingSystemOrchestrator:
         
         return categories
     
-    def _analyze_order_sizing_performance(self, strategy: EnhancedMLTradingStrategy) -> Dict[str, Any]:
-        """Analyze order sizing strategy performance"""
-        if not hasattr(strategy, 'trade_history') or not strategy.trade_history:
-            return {'no_trades': True}
+    def run_production_data_pipeline(self, symbol: str, days: int = 180) -> Dict[str, Any]:
+        """Run production-ready data pipeline with enhanced analysis"""
+        print(f"[PRODUCTION_PIPELINE] Running production data pipeline for {symbol}")
         
-        trades = strategy.trade_history
-        order_sizes = [t['shares'] for t in trades]
+        try:
+            # Data acquisition
+            end_date = dt.datetime.now()
+            start_date = end_date - dt.timedelta(days=days)
+            raw_data = self.data_provider.get_historical_data(symbol, start_date, end_date)
+            
+            if raw_data.empty:
+                return {"error": f"No data available for {symbol}"}
+            
+            # Data preprocessing
+            cleaned_data = self.data_preprocessor.clean_data(raw_data, symbol)
+            print(f"[PRODUCTION_PIPELINE] Data preprocessed: {len(cleaned_data)} records")
+            
+            # Enhanced market context analysis
+            market_context = self.market_analyzer.analyze_market_context(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            # Enhanced feature engineering
+            enhanced_features = self.feature_engineer.create_enhanced_features(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                include_market_context=True,
+                normalize_features=True
+            )
+            
+            pipeline_results = {
+                "symbol": symbol,
+                "period": f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}",
+                "data_quality": {
+                    "raw_records": len(raw_data),
+                    "processed_records": len(cleaned_data),
+                    "feature_count": len(enhanced_features.feature_names),
+                    "sample_count": len(enhanced_features.features)
+                },
+                "market_context": {
+                    "spy_correlation": market_context.spy_correlation,
+                    "qqq_correlation": market_context.qqq_correlation,
+                    "spy_beta": market_context.spy_beta,
+                    "qqq_beta": market_context.qqq_beta,
+                    "market_regime": market_context.market_regime,
+                    "volatility_regime": market_context.volatility_regime,
+                    "sector_strength": market_context.sector_strength
+                },
+                "enhanced_features": {
+                    "feature_names": enhanced_features.feature_names[:10],  # First 10 for brevity
+                    "metadata": enhanced_features.metadata
+                }
+            }
+            
+            print(f"[PRODUCTION_PIPELINE] Pipeline completed successfully")
+            print(f"                      Market Regime: {market_context.market_regime}")
+            print(f"                      Features Generated: {len(enhanced_features.feature_names)}")
+            
+            return pipeline_results
+            
+        except Exception as e:
+            error_msg = f"Production pipeline failed for {symbol}: {e}"
+            print(f"[PRODUCTION_PIPELINE] {error_msg}")
+            return {"error": error_msg}
+
+    def validate_system_health(self) -> Dict[str, Any]:
+        """Validate system health and component availability"""
+        health_report = {
+            "overall_status": "healthy",
+            "component_health": {},
+            "warnings": [],
+            "errors": []
+        }
         
+        # Check data layer
+        try:
+            test_data = self.data_provider.get_current_price("AAPL")
+            health_report["component_health"]["data_provider"] = "healthy"
+        except Exception as e:
+            health_report["component_health"]["data_provider"] = "unhealthy"
+            health_report["errors"].append(f"Data provider error: {e}")
+            health_report["overall_status"] = "degraded"
+        
+        # Check model layer
+        try:
+            models = self.model_manager.list_models()
+            health_report["component_health"]["model_manager"] = "healthy"
+            if len(models) == 0:
+                health_report["warnings"].append("No models available")
+        except Exception as e:
+            health_report["component_health"]["model_manager"] = "unhealthy"
+            health_report["errors"].append(f"Model manager error: {e}")
+        
+        # Check visualization layer
+        if self.chart_generator:
+            health_report["component_health"]["visualization"] = "healthy"
+        else:
+            health_report["component_health"]["visualization"] = "unavailable"
+            health_report["warnings"].append("Chart generator not available")
+        
+        return health_report
+    
+    def get_performance_metrics(self) -> Dict[str, Any]:
+        """Get comprehensive performance metrics"""
         return {
-            'total_trades': len(trades),
-            'avg_order_size': np.mean(order_sizes),
-            'order_size_std': np.std(order_sizes),
-            'min_order_size': np.min(order_sizes),
-            'max_order_size': np.max(order_sizes),
-            'sizing_strategy': strategy.order_sizing_config.strategy.value,
-            'size_efficiency': 1 - (np.std(order_sizes) / np.mean(order_sizes)) if np.mean(order_sizes) > 0 else 0
-        }
-    
-    def _analyze_signal_performance(self, backtest_result) -> Dict[str, Any]:
-        """Analyze signal generation performance"""
-        signal_history = backtest_result.additional_metrics.get('signal_history', [])
-        
-        if not signal_history:
-            return {'no_signals': True}
-        
-        signal_types = {}
-        for signal in signal_history:
-            sig_type = signal['signal_type']
-            if sig_type not in signal_types:
-                signal_types[sig_type] = {'count': 0, 'avg_confidence': 0, 'directions': []}
-            
-            signal_types[sig_type]['count'] += 1
-            signal_types[sig_type]['avg_confidence'] += signal['confidence']
-            signal_types[sig_type]['directions'].append(signal['signal'])
-        
-        # Calculate averages
-        for sig_type in signal_types:
-            count = signal_types[sig_type]['count']
-            signal_types[sig_type]['avg_confidence'] /= count
-            directions = signal_types[sig_type]['directions']
-            signal_types[sig_type]['buy_ratio'] = sum(1 for d in directions if d > 0) / count
-        
-        return {
-            'total_signals': len(signal_history),
-            'signal_types': signal_types,
-            'avg_confidence': np.mean([s['confidence'] for s in signal_history]),
-            'signal_distribution': {
-                'buy_signals': sum(1 for s in signal_history if s['signal'] > 0),
-                'sell_signals': sum(1 for s in signal_history if s['signal'] < 0)
+            "active_strategies": len(self.strategies),
+            "total_symbols_analyzed": len(self.symbols),
+            "models_trained": len(self.model_manager.list_models()),
+            "backtest_history": len(self.performance_history),
+            "system_uptime": dt.datetime.now().isoformat(),
+            "capital_utilization": {
+                "starting_capital": self.starting_capital,
+                "commission_rate": self.commission_rate,
+                "slippage_rate": self.slippage_rate
             }
         }
     
-    def _generate_performance_summary(self, symbol: str, ml_results: Dict, 
-                                    market_analysis: Optional[Dict], 
-                                    backtest_results: Dict) -> Dict[str, Any]:
-        """Generate comprehensive performance summary"""
-        summary = {
-            'symbol': symbol,
-            'overall_performance': 'SUCCESS' if backtest_results.get('success', True) else 'FAILED'
-        }
+    def cleanup_resources(self):
+        """Clean up system resources"""
+        print("[CLEANUP] Cleaning up system resources...")
         
-        # ML Model Performance
-        if ml_results.get('success', False):
-            summary['ml_model'] = {
-                'status': 'SUCCESS',
-                'algorithm': ml_results.get('model_type', 'Unknown'),
-                'train_accuracy': ml_results.get('train_accuracy', 0),
-                'test_accuracy': ml_results.get('test_accuracy', 0),
-                'feature_count': ml_results.get('feature_count', 0)
-            }
+        # Clear caches
+        if hasattr(self, 'data_provider'):
+            # Clear any cached data
+            pass
         
-        # Market Analysis Summary
-        if market_analysis:
-            mc = market_analysis.get('market_context', {})
-            summary['market_context'] = {
-                'spy_correlation': mc.get('spy_correlation', 0),
-                'market_regime': mc.get('market_regime', 'unknown'),
-                'volatility_regime': mc.get('volatility_regime', 'unknown'),
-                'feature_count': market_analysis.get('enhanced_features', {}).get('feature_count', 0)
-            }
+        # Clear performance history if needed
+        if len(self.performance_history) > 100:
+            # Keep only recent 100 entries
+            recent_keys = list(self.performance_history.keys())[-100:]
+            self.performance_history = {k: self.performance_history[k] for k in recent_keys}
         
-        # Trading Performance
-        if 'performance' in backtest_results:
-            perf = backtest_results['performance']
-            summary['trading_performance'] = {
-                'total_return': perf.get('total_return', 0),
-                'sharpe_ratio': perf.get('sharpe_ratio', 0),
-                'max_drawdown': perf.get('max_drawdown', 0),
-                'total_trades': backtest_results.get('trading_metrics', {}).get('total_trades', 0),
-                'win_rate': backtest_results.get('trading_metrics', {}).get('win_rate', 0)
-            }
-        
-        return summary
+        print("[CLEANUP] Resource cleanup completed")
     
-    def _print_enhanced_simulation_summary(self, results: Dict[str, Any]):
-        """Print comprehensive simulation summary"""
-        print(f"\n{'='*80}")
-        print(f"[COMPLETE] ENHANCED SIMULATION RESULTS - {results['symbol']}")
-        print(f"{'='*80}")
-        
-        # Configuration Summary
-        config = results.get('configuration', {})
-        print(f"[CONFIG] SIMULATION SETUP")
-        print(f"   Symbol: {results['symbol']}")
-        print(f"   Period: {config.get('simulation_months', 0)} months")
-        print(f"   Order Sizing: {config.get('order_sizing_strategy', 'Unknown')}")
-        print(f"   Starting Capital: ${config.get('starting_capital', 0):,.0f}")
-        
-        # ML Model Results
-        ml_results = results.get('ml_training', {})
-        if ml_results.get('success', False):
-            print(f"\n[ML_MODEL] TRAINING RESULTS")
-            print(f"   Algorithm: {ml_results.get('model_type', 'Unknown')}")
-            print(f"   Train Accuracy: {ml_results.get('train_accuracy', 0):.3f}")
-            print(f"   Test Accuracy: {ml_results.get('test_accuracy', 0):.3f}")
-            print(f"   Features: {ml_results.get('feature_count', 0)}")
-        
-        # Market Analysis Results
-        market_analysis = results.get('market_analysis', {})
-        if market_analysis:
-            mc = market_analysis.get('market_context', {})
-            print(f"\n[MARKET] CONTEXT ANALYSIS")
-            print(f"   SPY Correlation: {mc.get('spy_correlation', 0):.3f}")
-            print(f"   QQQ Correlation: {mc.get('qqq_correlation', 0):.3f}")
-            print(f"   Market Regime: {mc.get('market_regime', 'Unknown')}")
-            print(f"   Volatility Regime: {mc.get('volatility_regime', 'Unknown')}")
-            print(f"   Enhanced Features: {market_analysis.get('enhanced_features', {}).get('feature_count', 0)}")
-        
-        # Backtest Results
-        backtest_results = results.get('backtest_results', {})
-        if 'performance' in backtest_results:
-            perf = backtest_results['performance']
-            trading = backtest_results.get('trading_metrics', {})
-            
-            print(f"\n[PERFORMANCE] TRADING RESULTS")
-            print(f"   Total Return: {perf.get('total_return', 0):.1%}")
-            print(f"   Annualized Return: {perf.get('annualized_return', 0):.1%}")
-            print(f"   Sharpe Ratio: {perf.get('sharpe_ratio', 0):.3f}")
-            print(f"   Max Drawdown: {perf.get('max_drawdown', 0):.1%}")
-            print(f"   Volatility: {perf.get('volatility', 0):.1%}")
-            
-            print(f"\n[TRADING] EXECUTION METRICS")
-            print(f"   Total Trades: {trading.get('total_trades', 0)}")
-            print(f"   Win Rate: {trading.get('win_rate', 0):.1%}")
-            print(f"   Profit Factor: {trading.get('profit_factor', 0):.3f}")
-            
-            benchmark = backtest_results.get('benchmark_comparison', {})
-            if benchmark:
-                print(f"\n[BENCHMARK] COMPARISON ({benchmark.get('benchmark_symbol', 'SPY')})")
-                print(f"   Benchmark Return: {benchmark.get('benchmark_return', 0):.1%}")
-                print(f"   Outperformance: {benchmark.get('outperformance', 0):.1%}")
-        
-        # Overall Status
-        success = results.get('success', False)
-        print(f"\n[STATUS] SIMULATION COMPLETE")
-        print(f"   Result: {'SUCCESS' if success else 'FAILED'}")
-        if not success and 'error' in results:
-            print(f"   Error: {results['error']}")
-        
-        print(f"{'='*80}")
-        print(f"[SUCCESS] Enhanced Trading System simulation completed successfully!")
-        print(f"All features from enhanced_strategy.py have been implemented in the modular architecture!")
-        print(f"{'='*80}")
+    def get_simulation_runner(self):
+        """Get simulation runner for comprehensive testing capabilities"""
+        from .simulation.simulation_runner import SimulationRunner
+        return SimulationRunner(self)
     
+    def get_backtest_runner(self):
+        """Get backtesting runner for focused performance evaluation"""
+        from .simulation.enhanced_backtesting_runner import EnhancedBacktestingRunner
+        return EnhancedBacktestingRunner(self)
+
+    def create_trading_chart(self, symbol: str = "AAPL", timeframe: str = "1D", 
+                           indicators: Optional[List[str]] = None, period: str = "6mo") -> str:
+        """Create TradingView-style chart with enhanced functionality"""
+        if not self.chart_generator:
+            return "Error: TradingViewChartGenerator not available"
+        
+        try:
+            if indicators is None:
+                indicators = ["SMA", "EMA", "RSI", "MACD", "Bollinger Bands"]
+            
+            print(f"[CHART] Generating TradingView chart for {symbol}")
+            chart_path = self.chart_generator.create_comprehensive_chart(symbol, period)
+            print(f"[CHART] Chart created successfully: {chart_path}")
+            return chart_path
+        except Exception as e:
+            error_msg = f"Error creating trading chart: {e}"
+            print(f"[CHART] {error_msg}")
+            return error_msg
+
     def get_system_status(self) -> Dict[str, Any]:
-        """Get comprehensive system status"""
+        """Get comprehensive system status for production components"""
         return {
             'system_initialized': True,
-            'components': {
-                'data_provider': type(self.data_provider).__name__,
-                'model_manager': type(self.model_manager).__name__,
-                'market_analyzer': type(self.market_analyzer).__name__,
-                'feature_engineer': type(self.feature_engineer).__name__,
-                'backtester': type(self.backtester).__name__
+            'architecture': 'Production-Ready Modular Design',
+            'layers': {
+                'data_layer': {
+                    'data_provider': type(self.data_provider).__name__,
+                    'data_preprocessor': type(self.data_preprocessor).__name__,
+                    'indicator_calculator': type(self.indicator_calculator).__name__
+                },
+                'analysis_layer': {
+                    'market_analyzer': type(self.market_analyzer).__name__,
+                    'feature_engineer': type(self.feature_engineer).__name__
+                },
+                'model_layer': {
+                    'model_manager': type(self.model_manager).__name__,
+                    'model_training_service': type(self.model_training_service).__name__
+                },
+                'trading_layer': {
+                    'backtester': type(self.backtester).__name__
+                },
+                'visualization_layer': {
+                    'chart_generator': type(self.chart_generator).__name__ if self.chart_generator else 'Not Available'
+                }
             },
             'configuration': {
                 'starting_capital': self.starting_capital,
                 'commission_rate': self.commission_rate,
                 'slippage_rate': self.slippage_rate
             },
-            'active_symbols': list(self.symbols),
-            'active_strategies': list(self.strategies.keys()),
-            'available_models': len(self.model_manager.list_models()),
-            'performance_history': list(self.performance_history.keys())
+            'runtime_state': {
+                'active_symbols': list(self.symbols),
+                'active_strategies': list(self.strategies.keys()),
+                'available_models': len(self.model_manager.list_models()),
+                'performance_history': list(self.performance_history.keys())
+            }
         }
 
 
@@ -712,7 +644,7 @@ def demonstrate_enhanced_features():
     print(f"{'='*100}")
     
     # Initialize system
-    orchestrator = EnhancedTradingSystemOrchestrator(
+    orchestrator = ProductionTradingOrchestrator(
         starting_capital=100000,
         commission_rate=0.001,
         slippage_rate=0.0005
