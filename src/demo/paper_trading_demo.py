@@ -11,8 +11,8 @@ from pathlib import Path
 import pandas as pd
 from typing import Optional
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
+# Add project root to path (now we're in src/demo, so go up two levels)
+project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from config_manager import get_trading_symbols
@@ -590,6 +590,28 @@ async def handle_account_status(demo):
     else:
         print("  No positions currently held")
         print("  💡 Use 'Start Trading' to begin building your portfolio")
+    
+    # Show performance summary
+    performance = demo.paper_account.get_performance_summary()
+    print(f"\n📊 PERFORMANCE METRICS")
+    print("-" * 40)
+    print(f"Account Age:       {performance.get('trading_days', 0)} days")
+    print(f"Total Transactions: {performance.get('total_transactions', 0)}")
+    print(f"Buy Orders:        {performance.get('buy_transactions', 0)}")
+    print(f"Sell Orders:       {performance.get('sell_transactions', 0)}")
+    print(f"Total Fees:        ${performance.get('total_fees_paid', 0):.2f}")
+    print(f"Total Return:      ${performance.get('total_return', 0):+,.2f} ({performance.get('total_return_pct', 0):+.2f}%)")
+    
+    # Show recent transactions
+    recent_transactions = demo.paper_account.get_transactions()[-5:]  # Last 5 transactions
+    if recent_transactions:
+        print(f"\n📋 RECENT TRANSACTIONS (Last 5)")
+        print("-" * 40)
+        for txn in recent_transactions:
+            txn_time = txn.timestamp.strftime("%m/%d %H:%M")
+            symbol_str = f"{txn.symbol:6}" if txn.symbol else "Account"
+            amount_str = f"${abs(txn.amount):>8,.0f}"
+            print(f"  {txn_time} │ {txn.transaction_type.value.upper():4} │ {symbol_str} │ {amount_str} │ {txn.description}")
     
     await demo.paper_account.disconnect()
     

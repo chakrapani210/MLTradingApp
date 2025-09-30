@@ -13,6 +13,7 @@ from decimal import Decimal
 import datetime as dt
 import json
 import os
+from enum import Enum
 
 from ..interfaces.real_trading import (
     TradingAccountInterface, 
@@ -27,6 +28,110 @@ from ..interfaces.trading_strategy import Order, Position, OrderType, OrderSide
 from ..data.providers import YFinanceProvider
 
 
+class TransactionType(Enum):
+    """Types of account transactions"""
+    BUY = "buy"
+    SELL = "sell"
+    DIVIDEND = "dividend"
+    DEPOSIT = "deposit"
+    WITHDRAWAL = "withdrawal"
+    FEE = "fee"
+    INTEREST = "interest"
+
+
+@dataclass
+class Transaction:
+    """
+    Detailed transaction record for portfolio tracking and analysis
+    """
+    transaction_id: str
+    timestamp: pd.Timestamp
+    transaction_type: TransactionType
+    symbol: Optional[str]  # None for account-level transactions
+    quantity: float
+    price: float
+    amount: float  # Total transaction amount (quantity * price + fees)
+    fees: float
+    description: str
+    account_balance_after: float
+    portfolio_value_after: float
+    total_equity_after: float
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert transaction to dictionary for serialization"""
+        return {
+            'transaction_id': self.transaction_id,
+            'timestamp': self.timestamp.isoformat(),
+            'transaction_type': self.transaction_type.value,
+            'symbol': self.symbol,
+            'quantity': float(self.quantity),
+            'price': float(self.price),
+            'amount': float(self.amount),
+            'fees': float(self.fees),
+            'description': self.description,
+            'account_balance_after': float(self.account_balance_after),
+            'portfolio_value_after': float(self.portfolio_value_after),
+            'total_equity_after': float(self.total_equity_after)
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Transaction':
+        """Create transaction from dictionary"""
+        return cls(
+            transaction_id=data['transaction_id'],
+            timestamp=pd.Timestamp(data['timestamp']),
+            transaction_type=TransactionType(data['transaction_type']),
+            symbol=data.get('symbol'),
+            quantity=data['quantity'],
+            price=data['price'],
+            amount=data['amount'],
+            fees=data['fees'],
+            description=data['description'],
+            account_balance_after=data['account_balance_after'],
+            portfolio_value_after=data['portfolio_value_after'],
+            total_equity_after=data['total_equity_after']
+        )
+
+
+@dataclass
+class PortfolioSnapshot:
+    """
+    Portfolio value snapshot for tracking performance over time
+    """
+    timestamp: pd.Timestamp
+    cash_balance: float
+    portfolio_value: float
+    total_equity: float
+    positions_count: int
+    day_pnl: float
+    total_pnl: float
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert snapshot to dictionary for serialization"""
+        return {
+            'timestamp': self.timestamp.isoformat(),
+            'cash_balance': float(self.cash_balance),
+            'portfolio_value': float(self.portfolio_value),
+            'total_equity': float(self.total_equity),
+            'positions_count': int(self.positions_count),
+            'day_pnl': float(self.day_pnl),
+            'total_pnl': float(self.total_pnl)
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'PortfolioSnapshot':
+        """Create snapshot from dictionary"""
+        return cls(
+            timestamp=pd.Timestamp(data['timestamp']),
+            cash_balance=data['cash_balance'],
+            portfolio_value=data['portfolio_value'],
+            total_equity=data['total_equity'],
+            positions_count=data['positions_count'],
+            day_pnl=data['day_pnl'],
+            total_pnl=data['total_pnl']
+        )
+
+
 @dataclass
 class PaperTradingConfig:
     """Configuration for paper trading"""
@@ -39,6 +144,8 @@ class PaperTradingConfig:
     allow_fractional_shares: bool = False
     enable_after_hours: bool = False
     persistence_file: str = "paper_account_state.json"  # File to save account state
+    track_portfolio_snapshots: bool = True  # Enable portfolio value tracking
+    # Note: snapshots are taken on every transaction, not time-based
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary"""
@@ -51,7 +158,8 @@ class PaperTradingConfig:
             'max_order_value': self.max_order_value,
             'allow_fractional_shares': self.allow_fractional_shares,
             'enable_after_hours': self.enable_after_hours,
-            'persistence_file': self.persistence_file
+            'persistence_file': self.persistence_file,
+            'track_portfolio_snapshots': self.track_portfolio_snapshots
         }
 
 
@@ -71,6 +179,11 @@ class PaperTradingAccount(TradingAccountInterface):
         self._orders: Dict[str, OrderExecution] = {}
         self._trades: List[Trade] = []
         
+        # Enhanced tracking for charts and analysis
+        self._transactions: List[Transaction] = []  # Detailed transaction history
+        self._portfolio_snapshots: List[PortfolioSnapshot] = []  # Value tracking over time
+        self._last_snapshot_time: Optional[pd.Timestamp] = None
+        
         # Market data provider
         self._market_data_provider = YFinanceProvider()
         
@@ -81,7 +194,12 @@ class PaperTradingAccount(TradingAccountInterface):
         # Load persisted state if available
         self._load_account_state()
         
+        # Take initial snapshot if enabled
+        if self.config.track_portfolio_snapshots:
+            self._take_portfolio_snapshot("Account initialized")
+        
         print(f"[PAPER_ACCOUNT] Initialized with ${self._cash:,.2f} (persistence: {os.path.exists(self.config.persistence_file)})")
+        print(f"[PAPER_ACCOUNT] Tracking: {len(self._transactions)} transactions, {len(self._portfolio_snapshots)} snapshots")
     
     async def connect(self) -> bool:
         """Connect to paper trading platform"""
@@ -95,11 +213,95 @@ class PaperTradingAccount(TradingAccountInterface):
     
     async def disconnect(self) -> bool:
         """Disconnect from paper trading platform"""
+        # Take final snapshot
+        if self.config.track_portfolio_snapshots:
+            self._take_portfolio_snapshot("Session ended")
+        
         # Save account state before disconnecting
         self._save_account_state()
         self._is_connected = False
         print(f"[PAPER_ACCOUNT] Disconnected and state saved")
         return True
+    
+    def _take_portfolio_snapshot(self, description: str = "Transaction snapshot"):
+        """Take a portfolio value snapshot for tracking over time"""
+        try:
+            current_time = pd.Timestamp.now()
+            
+            # Take snapshot on every call - no time-based filtering
+            # This ensures we capture portfolio state after every significant transaction
+            
+            # Calculate current portfolio metrics
+            portfolio_value = sum(pos.market_value for pos in self._positions.values())
+            total_equity = self._cash + portfolio_value
+            positions_count = len([p for p in self._positions.values() if not p.is_flat])
+            
+            # Calculate P&L
+            initial_value = self.config.initial_cash
+            total_pnl = total_equity - initial_value
+            
+            # Day P&L (simplified as unrealized P&L for now)
+            day_pnl = sum(pos.unrealized_pnl for pos in self._positions.values())
+            
+            # Create snapshot
+            snapshot = PortfolioSnapshot(
+                timestamp=current_time,
+                cash_balance=self._cash,
+                portfolio_value=portfolio_value,
+                total_equity=total_equity,
+                positions_count=positions_count,
+                day_pnl=day_pnl,
+                total_pnl=total_pnl
+            )
+            
+            self._portfolio_snapshots.append(snapshot)
+            self._last_snapshot_time = current_time
+            
+            print(f"[PORTFOLIO_SNAPSHOT] {description}: ${total_equity:,.2f} total equity, {positions_count} positions")
+            
+        except Exception as e:
+            print(f"[PORTFOLIO_SNAPSHOT] Failed to take snapshot: {e}")
+    
+    def _record_transaction(self, transaction_type: TransactionType, symbol: Optional[str], 
+                          quantity: float, price: float, fees: float, description: str):
+        """Record a detailed transaction for analysis and charting"""
+        try:
+            # Calculate amounts
+            amount = abs(quantity * price) + fees
+            if transaction_type in [TransactionType.SELL, TransactionType.WITHDRAWAL]:
+                amount = -amount
+            
+            # Get current portfolio state
+            portfolio_value = sum(pos.market_value for pos in self._positions.values())
+            total_equity = self._cash + portfolio_value
+            
+            # Create transaction record
+            transaction = Transaction(
+                transaction_id=str(uuid.uuid4()),
+                timestamp=pd.Timestamp.now(),
+                transaction_type=transaction_type,
+                symbol=symbol,
+                quantity=quantity,
+                price=price,
+                amount=amount,
+                fees=fees,
+                description=description,
+                account_balance_after=self._cash,
+                portfolio_value_after=portfolio_value,
+                total_equity_after=total_equity
+            )
+            
+            self._transactions.append(transaction)
+            
+            print(f"[TRANSACTION] {transaction_type.value.upper()}: {symbol or 'Account'} "
+                  f"${abs(amount):,.2f} - {description}")
+            
+            # Take snapshot after recording transaction (for all transaction types)
+            # This ensures we have portfolio state captured at every significant event
+            self._take_portfolio_snapshot(f"Transaction: {transaction_type.value} {symbol or 'Account'}")
+            
+        except Exception as e:
+            print(f"[TRANSACTION] Failed to record transaction: {e}")
     
     def _save_account_state(self):
         """Save current account state to persistence file"""
@@ -115,6 +317,8 @@ class PaperTradingAccount(TradingAccountInterface):
                 'last_update': pd.Timestamp.now().isoformat(),
                 'positions': {},
                 'trades': [],
+                'transactions': [],  # Enhanced transaction tracking
+                'portfolio_snapshots': [],  # Portfolio value over time
                 'order_count': len(self._orders)
             }
             
@@ -154,6 +358,14 @@ class PaperTradingAccount(TradingAccountInterface):
                     'timestamp': trade.timestamp.isoformat(),
                     'commission': float(trade.commission) if trade.commission else 0.0
                 })
+            
+            # Serialize transactions (last 500 for comprehensive history)
+            for transaction in self._transactions[-500:]:
+                state_data['transactions'].append(transaction.to_dict())
+            
+            # Serialize portfolio snapshots (last 100 for charting)
+            for snapshot in self._portfolio_snapshots[-100:]:
+                state_data['portfolio_snapshots'].append(snapshot.to_dict())
             
             # Write to file
             with open(self.config.persistence_file, 'w') as f:
@@ -208,8 +420,26 @@ class PaperTradingAccount(TradingAccountInterface):
                 )
                 self._trades.append(trade)
             
+            # Load transactions
+            self._transactions = []
+            for transaction_data in state_data.get('transactions', []):
+                transaction = Transaction.from_dict(transaction_data)
+                self._transactions.append(transaction)
+            
+            # Load portfolio snapshots
+            self._portfolio_snapshots = []
+            for snapshot_data in state_data.get('portfolio_snapshots', []):
+                snapshot = PortfolioSnapshot.from_dict(snapshot_data)
+                self._portfolio_snapshots.append(snapshot)
+            
+            # Set last snapshot time
+            if self._portfolio_snapshots:
+                self._last_snapshot_time = self._portfolio_snapshots[-1].timestamp
+            
             print(f"[PAPER_ACCOUNT] State loaded from {self.config.persistence_file}")
-            print(f"[PAPER_ACCOUNT] Loaded: ${self._cash:,.2f} cash, {len(self._positions)} positions, {len(self._trades)} trades")
+            print(f"[PAPER_ACCOUNT] Loaded: ${self._cash:,.2f} cash, {len(self._positions)} positions, "
+                  f"{len(self._trades)} trades, {len(self._transactions)} transactions, "
+                  f"{len(self._portfolio_snapshots)} snapshots")
             
         except Exception as e:
             print(f"[PAPER_ACCOUNT] Failed to load state: {e}")
@@ -218,6 +448,9 @@ class PaperTradingAccount(TradingAccountInterface):
             self._cash = self.config.initial_cash
             self._positions = {}
             self._trades = []
+            self._transactions = []
+            self._portfolio_snapshots = []
+            self._last_snapshot_time = None
     
     async def get_account_balance(self) -> AccountBalance:
         """Get current account balance"""
@@ -356,6 +589,23 @@ class PaperTradingAccount(TradingAccountInterface):
             self._orders[order_id] = execution
             self._trades.append(trade)
             
+            # Record detailed transaction for analysis
+            transaction_type = TransactionType.BUY if order.side == OrderSide.BUY else TransactionType.SELL
+            fees = execution.commission or 0.0
+            description = f"{order.order_type.value.title()} order execution"
+            
+            self._record_transaction(
+                transaction_type=transaction_type,
+                symbol=order.symbol,
+                quantity=execution.filled_quantity,
+                price=execution_price,
+                fees=fees,
+                description=description
+            )
+            
+            # Take snapshot after every trade execution for precise tracking
+            self._take_portfolio_snapshot(f"After {transaction_type.value}: {order.symbol}")
+            
             # Auto-save state after each trade
             self._save_account_state()
             
@@ -407,6 +657,88 @@ class PaperTradingAccount(TradingAccountInterface):
         
         return trades
     
+    def get_transactions(
+        self, 
+        start_date: Optional[dt.datetime] = None,
+        end_date: Optional[dt.datetime] = None,
+        symbol: Optional[str] = None,
+        transaction_type: Optional[TransactionType] = None
+    ) -> List[Transaction]:
+        """Get filtered transaction history"""
+        transactions = self._transactions.copy()
+        
+        if start_date:
+            transactions = [t for t in transactions if t.timestamp >= pd.Timestamp(start_date)]
+        
+        if end_date:
+            transactions = [t for t in transactions if t.timestamp <= pd.Timestamp(end_date)]
+        
+        if symbol:
+            transactions = [t for t in transactions if t.symbol == symbol]
+        
+        if transaction_type:
+            transactions = [t for t in transactions if t.transaction_type == transaction_type]
+        
+        return transactions
+    
+    def get_portfolio_snapshots(
+        self,
+        start_date: Optional[dt.datetime] = None,
+        end_date: Optional[dt.datetime] = None
+    ) -> List[PortfolioSnapshot]:
+        """Get portfolio value snapshots for charting"""
+        snapshots = self._portfolio_snapshots.copy()
+        
+        if start_date:
+            snapshots = [s for s in snapshots if s.timestamp >= pd.Timestamp(start_date)]
+        
+        if end_date:
+            snapshots = [s for s in snapshots if s.timestamp <= pd.Timestamp(end_date)]
+        
+        return snapshots
+    
+    def get_performance_summary(self) -> Dict[str, Any]:
+        """Get comprehensive performance summary for analysis"""
+        if not self._transactions:
+            return {
+                'total_transactions': 0,
+                'total_equity': self._cash,
+                'total_return': 0.0,
+                'total_return_pct': 0.0,
+                'positions_count': 0,
+                'snapshots_count': 0
+            }
+        
+        # Calculate performance metrics
+        current_portfolio_value = sum(pos.market_value for pos in self._positions.values())
+        current_total_equity = self._cash + current_portfolio_value
+        initial_value = self.config.initial_cash
+        total_return = current_total_equity - initial_value
+        total_return_pct = (total_return / initial_value) * 100 if initial_value > 0 else 0.0
+        
+        # Transaction statistics
+        buy_transactions = len([t for t in self._transactions if t.transaction_type == TransactionType.BUY])
+        sell_transactions = len([t for t in self._transactions if t.transaction_type == TransactionType.SELL])
+        total_fees = sum(t.fees for t in self._transactions)
+        
+        return {
+            'account_created': self._account_created_at.isoformat(),
+            'last_update': self._last_update.isoformat(),
+            'initial_cash': initial_value,
+            'current_cash': self._cash,
+            'current_portfolio_value': current_portfolio_value,
+            'current_total_equity': current_total_equity,
+            'total_return': total_return,
+            'total_return_pct': total_return_pct,
+            'total_transactions': len(self._transactions),
+            'buy_transactions': buy_transactions,
+            'sell_transactions': sell_transactions,
+            'total_fees_paid': total_fees,
+            'positions_count': len([p for p in self._positions.values() if not p.is_flat]),
+            'snapshots_count': len(self._portfolio_snapshots),
+            'trading_days': (pd.Timestamp.now() - self._account_created_at).days
+        }
+    
     def reset_account(self):
         """Reset paper trading account to initial state"""
         print(f"[PAPER_ACCOUNT] Resetting account to initial state")
@@ -414,8 +746,25 @@ class PaperTradingAccount(TradingAccountInterface):
         self._positions = {}
         self._orders = {}
         self._trades = []
+        self._transactions = []  # Clear transaction history
+        self._portfolio_snapshots = []  # Clear snapshots
+        self._last_snapshot_time = None
         self._account_created_at = pd.Timestamp.now()
         self._last_update = pd.Timestamp.now()
+        
+        # Record reset transaction
+        self._record_transaction(
+            transaction_type=TransactionType.DEPOSIT,
+            symbol=None,
+            quantity=0,
+            price=0,
+            fees=0,
+            description=f"Account reset to initial cash: ${self.config.initial_cash:,.2f}"
+        )
+        
+        # Take initial snapshot
+        if self.config.track_portfolio_snapshots:
+            self._take_portfolio_snapshot("Account reset")
         
         # Remove persistence file
         if os.path.exists(self.config.persistence_file):
