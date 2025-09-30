@@ -1,0 +1,80 @@
+# Paper Trading Demo Configuration
+# Specialized configuration for paper trading demonstrations
+
+# Trading Symbols (these should have pre-trained models)
+trading_symbols: ['AAPL', 'NVDA', 'TSLA', 'GME', 'CRWD']
+default_symbol: 'AAPL'
+
+# Paper Trading Settings
+paper_trading:
+  initial_balance: 100000.0      # Starting capital
+  commission_rate: 0.0           # No commission for demo
+  enable_slippage: true          # Realistic market simulation
+  slippage_rate: 0.001           # 0.1% slippage
+  max_position_size: 0.2         # Maximum 20% per position
+  min_confidence_threshold: 0.6  # Minimum signal confidence to trade
+
+# ML Model Settings
+ml_models:
+  enabled: true
+  model_type: 'RandomForest'
+  confidence_threshold: 0.6
+  model_weight: 2.0              # Weight ML predictions higher than technical signals
+
+# Technical Analysis Configuration
+technical_analysis:
+  signal_generators:
+    rsi:
+      enabled: true
+      period: 14
+      oversold_threshold: 30
+      overbought_threshold: 70
+      weight: 1.0
+    
+    macd:
+      enabled: true
+      fast_period: 12
+      slow_period: 26
+      signal_period: 9
+      weight: 1.0
+    
+    sma_crossover:
+      enabled: true
+      short_period: 20
+      long_period: 50
+      weight: 1.0
+    
+    bollinger_bands:
+      enabled: false             # Disabled for demo
+      period: 20
+      std_dev: 2
+      weight: 0.8
+
+# Risk Management
+risk_management:
+  max_portfolio_risk: 0.15       # Maximum 15% portfolio risk
+  max_position_correlation: 0.7  # Limit correlated positions
+  stop_loss_pct: 0.05           # 5% stop loss
+  take_profit_pct: 0.15         # 15% take profit
+  
+# Data Sources
+data:
+  primary_provider: 'yfinance'
+  backup_provider: 'alpha_vantage'
+  cache_enabled: true
+  cache_duration_hours: 1
+
+# Demo Settings
+demo:
+  max_iterations: 5              # For continuous demo
+  iteration_delay_seconds: 30    # Wait between iterations
+  verbose_output: true           # Detailed logging
+  save_trade_history: true       # Save trades to file
+  
+# Display Settings
+display:
+  show_account_summary: true
+  show_position_details: true
+  show_trade_analytics: true
+  show_signal_breakdown: true
+  decimal_places: 2

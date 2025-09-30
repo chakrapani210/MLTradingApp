@@ -1,0 +1,81 @@
+{
+  "config": {
+    "initial_cash": 100000.0,
+    "commission_per_trade": 0.0,
+    "commission_rate": 0.0,
+    "slippage_rate": 0.001,
+    "min_order_value": 1.0,
+    "max_order_value": 50000.0,
+    "allow_fractional_shares": false,
+    "enable_after_hours": false,
+    "persistence_file": "demo/paper_account_state.json"
+  },
+  "cash": 91196.3051977539,
+  "account_created_at": "2025-09-29T17:23:54.412950",
+  "last_update": "2025-09-29T17:24:07.034242",
+  "positions": {
+    "AAPL": {
+      "symbol": "AAPL",
+      "quantity": 10.0,
+      "avg_price": 254.68442266845702,
+      "market_value": 2546.84422668457,
+      "unrealized_pnl": 0.0,
+      "realized_pnl": 0.0,
+      "current_price": 254.43,
+      "timestamp": "2025-09-29T17:23:54.856920"
+    },
+    "NVDA": {
+      "symbol": "NVDA",
+      "quantity": 10.0,
+      "avg_price": 182.03185610961913,
+      "market_value": 1820.3185610961914,
+      "unrealized_pnl": 0.0,
+      "realized_pnl": 0.0,
+      "current_price": 181.85,
+      "timestamp": "2025-09-29T17:23:55.365305"
+    },
+    "TSLA": {
+      "symbol": "TSLA",
+      "quantity": 10.0,
+      "avg_price": 443.6532014465332,
+      "market_value": 4436.532014465332,
+      "unrealized_pnl": 0.0,
+      "realized_pnl": 0.0,
+      "current_price": 443.21,
+      "timestamp": "2025-09-29T17:23:56.087181"
+    }
+  },
+  "trades": [
+    {
+      "trade_id": "6dd95341-06b5-4580-a79a-b149f7c06212",
+      "order_id": "b5a0d078-1e7c-4a5b-8dea-6dc2e7654432",
+      "symbol": "AAPL",
+      "side": "buy",
+      "quantity": 10.0,
+      "price": 254.68442266845702,
+      "timestamp": "2025-09-29T17:23:54.856920",
+      "commission": 0.0
+    },
+    {
+      "trade_id": "f2e81264-24f0-4e95-820d-84843a0739fc",
+      "order_id": "01d87d33-6257-462a-9501-5b30890b147b",
+      "symbol": "NVDA",
+      "side": "buy",
+      "quantity": 10.0,
+      "price": 182.03185610961913,
+      "timestamp": "2025-09-29T17:23:55.365305",
+      "commission": 0.0
+    },
+    {
+      "trade_id": "b58ad29a-abaf-4ea1-a1d0-8ad8f932eb34",
+      "order_id": "2ac67710-9aac-4a30-84ef-aed50d61f6cd",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 10.0,
+      "price": 443.6532014465332,
+      "timestamp": "2025-09-29T17:23:56.087181",
+      "commission": 0.0
+    }
+  ],
+  "order_count": 0
+}
