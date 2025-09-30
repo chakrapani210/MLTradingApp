@@ -18,17 +18,18 @@ sys.path.insert(0, str(project_root))
 from config_manager import get_trading_symbols
 from src.enhanced_orchestrator import ProductionTradingOrchestrator
 from src.trading.paper_trading import PaperTradingAccount, PaperTradingConfig
+from src.trading.trading_app_base import TradingAppBase
 from src.interfaces.trading_strategy import Order, OrderType, OrderSide
 
 
-class UnifiedPaperTradingDemo:
+class UnifiedPaperTradingDemo(TradingAppBase):
     """
     Unified Paper Trading Demo Application
-    Supports multiple modes with a single codebase
+    Uses the common TradingAppBase for consistency with Robinhood app
     """
     
     def __init__(self):
-        """Initialize the unified demo"""
+        """Initialize the unified paper trading demo"""
         # Paper trading configuration
         self.paper_config = PaperTradingConfig(
             initial_cash=100000.0,
@@ -36,55 +37,30 @@ class UnifiedPaperTradingDemo:
             slippage_rate=0.001
         )
         
-        # Initialize production orchestrator (reuse existing!)
-        self.production_orchestrator = ProductionTradingOrchestrator(
-            starting_capital=100000,
-            commission_rate=0.0,
-            slippage_rate=0.001
-        )
+        # Initialize base class
+        super().__init__(starting_capital=100000.0, commission_rate=0.0)
         
         # Initialize paper account
-        self.paper_account = PaperTradingAccount(self.paper_config)
-        
-        # Configuration
-        self.symbols = get_trading_symbols()
+        self.account = PaperTradingAccount(self.paper_config)
         
         print("🎯 UNIFIED PAPER TRADING DEMO")
         print(f"📊 Symbols: {', '.join(self.symbols)}")
         print(f"💰 Capital: ${self.paper_config.initial_cash:,.2f}")
         print("🚀 Using ProductionTradingOrchestrator")
     
+    async def connect_account(self) -> bool:
+        """Connect to paper trading account"""
+        return await self.account.connect()
+    
+    async def disconnect_account(self) -> bool:
+        """Disconnect from paper trading account"""
+        return await self.account.disconnect()
+    
     async def run_mode(self, mode: str = "production", symbol_limit: int = 3):
         """
-        Run demo in specified mode
-        
-        Args:
-            mode: 'simple', 'basic', or 'production'
-            symbol_limit: Number of symbols to analyze
+        Run demo in specified mode (delegates to base class)
         """
-        print(f"\n{'='*80}")
-        print(f"🚀 PAPER TRADING DEMO - {mode.upper()} MODE")
-        print(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"{'='*80}")
-        
-        # Connect to paper account
-        await self.paper_account.connect()
-        await self._display_account_status()
-        
-        if mode == "simple":
-            await self._run_simple_mode()
-        elif mode == "basic":
-            await self._run_basic_mode(symbol_limit)
-        elif mode == "production":
-            await self._run_production_mode(symbol_limit)
-        else:
-            print(f"❌ Unknown mode: {mode}")
-            return
-        
-        # Final status
-        await self._display_account_status()
-        await self.paper_account.disconnect()
-        print(f"\n✅ {mode.upper()} demo completed!")
+        await self.run_trading_mode(mode, symbol_limit)
     
     async def _run_simple_mode(self):
         """Simple mode: Manual orders with real prices"""
@@ -96,7 +72,7 @@ class UnifiedPaperTradingDemo:
         for symbol in test_symbols:
             try:
                 # Get real current price
-                current_price = await self._get_real_price(symbol)
+                current_price = await self.get_real_price(symbol)
                 if not current_price:
                     print(f"   ❌ Could not get price for {symbol}")
                     continue
@@ -114,7 +90,7 @@ class UnifiedPaperTradingDemo:
                 )
                 
                 print(f"   📋 Placing BUY order: {quantity} shares")
-                execution = await self.paper_account.place_order(order)
+                execution = await self.account.place_order(order)
                 
                 if execution.is_complete:
                     cost = execution.filled_quantity * execution.avg_fill_price
@@ -187,8 +163,8 @@ class UnifiedPaperTradingDemo:
                     print(f"   Market Regime: {ctx['market_regime']}")
                     print(f"   SPY Beta: {ctx['spy_beta']:.3f}")
                 
-                # 3. Generate production decision
-                decision = self._make_production_decision(symbol, ml_results, market_analysis)
+                # 3. Generate production decision using orchestrator
+                decision = await self._make_production_decision_via_orchestrator(symbol)
                 
                 if decision['action'] != 'HOLD':
                     decisions.append(decision)
@@ -233,81 +209,41 @@ class UnifiedPaperTradingDemo:
             'reasoning': f"ML model avg accuracy: {confidence:.2f}"
         }
     
-    def _make_production_decision(self, symbol: str, ml_results: dict, market_analysis: dict) -> dict:
-        """Make production trading decision using full analysis"""
-        buy_score = 0
-        sell_score = 0
-        reasoning = []
-        
-        # ML Model Factor
-        if ml_results.get('success', False):
-            test_acc = ml_results.get('test_accuracy', 0.5)
-            train_acc = ml_results.get('train_accuracy', 0.5)
-            model_quality = (test_acc + train_acc) / 2
+    async def _make_production_decision_via_orchestrator(self, symbol: str) -> dict:
+        """Make production trading decision using orchestrator's signal generation"""
+        try:
+            # Use orchestrator's comprehensive signal generation
+            signal_result = await self.orchestrator.generate_trading_signal(
+                symbol=symbol,
+                include_market_context=True,
+                apply_production_adjustments=True
+            )
             
-            if model_quality > 0.6:
-                buy_score += 1.5 * model_quality
-                reasoning.append(f"Strong ML model ({model_quality:.2f})")
-            elif model_quality > 0.5:
-                buy_score += 0.8 * model_quality
-                reasoning.append(f"Moderate ML model ({model_quality:.2f})")
-        
-        # Market Context Factor
-        if 'market_context' in market_analysis:
-            ctx = market_analysis['market_context']
-            spy_corr = ctx.get('spy_correlation', 0)
-            market_regime = ctx.get('market_regime', 'neutral')
-            spy_beta = ctx.get('spy_beta', 1.0)
+            if not signal_result.get('success', False):
+                return {
+                    'symbol': symbol,
+                    'action': 'HOLD',
+                    'confidence': 0.0,
+                    'reasoning': signal_result.get('reasoning', 'Signal generation failed')
+                }
             
-            if market_regime in ['bull', 'strong_bull'] and spy_corr > 0.5:
-                buy_score += 1.5
-                reasoning.append(f"Bull market + correlation ({spy_corr:.2f})")
-                
-                if spy_beta > 1.3:
-                    buy_score += 0.5
-                    reasoning.append(f"High beta leverage ({spy_beta:.2f})")
+            return {
+                'symbol': symbol,
+                'action': signal_result['action'],
+                'confidence': signal_result['confidence'],
+                'reasoning': signal_result['reasoning'],
+                'market_context': signal_result.get('market_context'),
+                'orchestrator_signal': True
+            }
             
-            elif market_regime in ['bear', 'strong_bear']:
-                sell_score += 1.0
-                reasoning.append(f"Bear market regime")
-        
-        # Feature Analysis Factor
-        if 'enhanced_features' in market_analysis:
-            features = market_analysis['enhanced_features']
-            target_dist = features.get('target_distribution', {})
-            
-            buy_signals = target_dist.get('buy_signals', 0)
-            sell_signals = target_dist.get('sell_signals', 0)
-            total_signals = buy_signals + sell_signals
-            
-            if total_signals > 20:
-                buy_ratio = buy_signals / total_signals
-                if buy_ratio > 0.6:
-                    buy_score += 1.0
-                    reasoning.append(f"Strong buy features ({buy_ratio:.0%})")
-                elif buy_ratio < 0.4:
-                    sell_score += 0.8
-                    reasoning.append(f"Strong sell features ({1-buy_ratio:.0%})")
-        
-        # Final decision
-        confidence = max(buy_score, sell_score) / 3.0
-        confidence = min(confidence, 1.0)
-        
-        if buy_score > sell_score and confidence > 0.55:
-            action = 'BUY'
-        elif sell_score > buy_score and confidence > 0.55:
-            action = 'SELL'
-        else:
-            action = 'HOLD'
-        
-        return {
-            'symbol': symbol,
-            'action': action,
-            'confidence': confidence,
-            'buy_score': buy_score,
-            'sell_score': sell_score,
-            'reasoning': '; '.join(reasoning) if reasoning else 'Insufficient signals'
-        }
+        except Exception as e:
+            print(f"❌ Orchestrator signal generation failed for {symbol}: {e}")
+            return {
+                'symbol': symbol,
+                'action': 'HOLD',
+                'confidence': 0.0,
+                'reasoning': f"Orchestrator error: {str(e)}"
+            }
     
     async def _execute_basic_decision(self, decision: dict):
         """Execute basic trading decision"""
@@ -327,7 +263,7 @@ class UnifiedPaperTradingDemo:
             )
             
             print(f"   📋 {symbol}: BUY {quantity} shares")
-            execution = await self.paper_account.place_order(order)
+            execution = await self.account.place_order(order)
             
             if execution.is_complete:
                 print(f"   ✅ Executed: ${execution.avg_fill_price:.2f} per share")
@@ -347,7 +283,7 @@ class UnifiedPaperTradingDemo:
             return
         
         # Production position sizing
-        balance = await self.paper_account.get_account_balance()
+        balance = await self.account.get_account_balance()
         max_position_pct = 0.12 * confidence
         position_value = balance.cash * max_position_pct
         quantity = max(int(position_value / current_price), 1)
@@ -374,7 +310,7 @@ class UnifiedPaperTradingDemo:
             print(f"       Position: ${quantity * current_price:,.2f} ({max_position_pct:.1%} of cash)")
             print(f"       Reasoning: {decision['reasoning']}")
             
-            execution = await self.paper_account.place_order(order)
+            execution = await self.account.place_order(order)
             
             if execution.is_complete:
                 total_cost = execution.filled_quantity * execution.avg_fill_price
@@ -411,8 +347,8 @@ class UnifiedPaperTradingDemo:
     
     async def _display_account_status(self):
         """Display current account status"""
-        balance = await self.paper_account.get_account_balance()
-        portfolio = await self.paper_account.get_portfolio_summary()
+        balance = await self.account.get_account_balance()
+        portfolio = await self.account.get_portfolio_summary()
         
         print(f"\n💰 ACCOUNT STATUS")
         print("-" * 30)
@@ -501,9 +437,9 @@ async def handle_account_reset(demo):
     print("="*80)
     
     # Show current state first
-    await demo.paper_account.connect()
-    balance = await demo.paper_account.get_account_balance()
-    portfolio = await demo.paper_account.get_portfolio_summary()
+    await demo.account.connect()
+    balance = await demo.account.get_account_balance()
+    portfolio = await demo.account.get_portfolio_summary()
     
     print(f"\n📊 CURRENT ACCOUNT STATE:")
     print(f"   Cash: ${balance.cash:,.2f}")
@@ -511,7 +447,7 @@ async def handle_account_reset(demo):
     print(f"   Total: ${balance.total_equity:,.2f}")
     print(f"   Positions: {len([p for p in portfolio.positions if not p.is_flat])}")
     
-    await demo.paper_account.disconnect()
+    await demo.account.disconnect()
     
     # Confirmation
     print(f"\n⚠️  WARNING: This will reset your paper trading account!")
@@ -524,7 +460,7 @@ async def handle_account_reset(demo):
         confirm = input(f"\n❓ Are you sure you want to reset? (type 'RESET' to confirm): ").strip()
         
         if confirm == 'RESET':
-            demo.paper_account.reset_account()
+            demo.account.reset_account()
             print(f"\n✅ Account has been reset successfully!")
             print(f"💰 Starting fresh with ${demo.paper_config.initial_cash:,.2f}")
         else:
@@ -541,11 +477,11 @@ async def handle_account_status(demo):
     print("="*80)
     
     # Connect to get latest data
-    await demo.paper_account.connect()
+    await demo.account.connect()
     
     # Get account balance
-    balance = await demo.paper_account.get_account_balance()
-    portfolio = await demo.paper_account.get_portfolio_summary()
+    balance = await demo.account.get_account_balance()
+    portfolio = await demo.account.get_portfolio_summary()
     
     # Display detailed account information
     print(f"\n💰 ACCOUNT BALANCE")
@@ -592,7 +528,7 @@ async def handle_account_status(demo):
         print("  💡 Use 'Start Trading' to begin building your portfolio")
     
     # Show performance summary
-    performance = demo.paper_account.get_performance_summary()
+    performance = demo.account.get_performance_summary()
     print(f"\n📊 PERFORMANCE METRICS")
     print("-" * 40)
     print(f"Account Age:       {performance.get('trading_days', 0)} days")
@@ -603,7 +539,7 @@ async def handle_account_status(demo):
     print(f"Total Return:      ${performance.get('total_return', 0):+,.2f} ({performance.get('total_return_pct', 0):+.2f}%)")
     
     # Show recent transactions
-    recent_transactions = demo.paper_account.get_transactions()[-5:]  # Last 5 transactions
+    recent_transactions = demo.account.get_transactions()[-5:]  # Last 5 transactions
     if recent_transactions:
         print(f"\n📋 RECENT TRANSACTIONS (Last 5)")
         print("-" * 40)
@@ -613,7 +549,7 @@ async def handle_account_status(demo):
             amount_str = f"${abs(txn.amount):>8,.0f}"
             print(f"  {txn_time} │ {txn.transaction_type.value.upper():4} │ {symbol_str} │ {amount_str} │ {txn.description}")
     
-    await demo.paper_account.disconnect()
+    await demo.account.disconnect()
     
     print(f"\n✅ Account status retrieved successfully!")
 

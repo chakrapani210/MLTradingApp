@@ -48,6 +48,10 @@ class RSISignalGenerator(SignalGenerator):
         self.oversold_threshold = self.config.get('oversold_threshold', rsi_config.get('oversold_threshold', 30))
         self.overbought_threshold = self.config.get('overbought_threshold', rsi_config.get('overbought_threshold', 70))
     
+    def get_required_columns(self) -> List[str]:
+        """Get list of required DataFrame columns for RSI calculation"""
+        return ['close']
+    
     def generate_signals(self, data: pd.DataFrame, symbol: str) -> List[TradingSignal]:
         """
         Generate RSI-based trading signals
@@ -152,6 +156,10 @@ class MACDSignalGenerator(SignalGenerator):
         self.slow_period = self.config.get('slow_period', macd_config.get('slow_period', 26))
         self.signal_period = self.config.get('signal_period', macd_config.get('signal_period', 9))
     
+    def get_required_columns(self) -> List[str]:
+        """Get list of required DataFrame columns for MACD calculation"""
+        return ['close']
+    
     def generate_signals(self, data: pd.DataFrame, symbol: str) -> List[TradingSignal]:
         """Generate MACD-based signals"""
         try:
@@ -254,6 +262,10 @@ class BollingerBandsSignalGenerator(SignalGenerator):
         # Use centralized config with local overrides
         self.period = self.config.get('period', bb_config.get('period', 20))
         self.std_dev = self.config.get('std_dev', bb_config.get('std_dev', 2))
+    
+    def get_required_columns(self) -> List[str]:
+        """Get list of required DataFrame columns for Bollinger Bands calculation"""
+        return ['close']
     
     def generate_signals(self, data: pd.DataFrame, symbol: str) -> List[TradingSignal]:
         """Generate Bollinger Bands signals"""
@@ -370,6 +382,10 @@ class SMACrossoverSignalGenerator(SignalGenerator):
         self.long_period = self.config.get('long_period', sma_config.get('long_period', 50))
         self.confirmation_periods = self.config.get('confirmation_periods', sma_config.get('confirmation_periods', 2))
     
+    def get_required_columns(self) -> List[str]:
+        """Get list of required DataFrame columns for SMA Crossover calculation"""
+        return ['close']
+    
     def generate_signals(self, data: pd.DataFrame, symbol: str) -> List[TradingSignal]:
         """Generate SMA crossover signals"""
         try:
@@ -484,6 +500,10 @@ class EMASignalGenerator(SignalGenerator):
         self.crossover_pairs = self.config.get('crossover_pairs', ema_config.get('crossover_pairs', [[12, 26]]))
         self.slope_threshold = self.config.get('slope_threshold', ema_config.get('slope_threshold', 0.001))
         self.min_confidence = self.config.get('min_confidence', ema_config.get('min_confidence', 0.3))
+    
+    def get_required_columns(self) -> List[str]:
+        """Get list of required DataFrame columns for EMA calculation"""
+        return ['close']
     
     def generate_signals(self, data: pd.DataFrame, symbol: str) -> List[TradingSignal]:
         """Generate EMA-based signals"""
@@ -611,6 +631,10 @@ class VolumeAnalysisSignalGenerator(SignalGenerator):
         self.volume_sma_period = self.config.get('volume_sma_period', volume_config.get('volume_sma_period', 20))
         self.obv_period = self.config.get('obv_period', volume_config.get('obv_period', 10))
         self.volume_spike_threshold = self.config.get('volume_spike_threshold', volume_config.get('volume_spike_threshold', 2.0))
+    
+    def get_required_columns(self) -> List[str]:
+        """Get list of required DataFrame columns for Volume Analysis calculation"""
+        return ['close', 'volume']
     
     def generate_signals(self, data: pd.DataFrame, symbol: str) -> List[TradingSignal]:
         """Generate volume-based signals"""

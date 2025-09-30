@@ -764,6 +764,253 @@ class ProductionTradingOrchestrator:
             print(f"[CHART] Error generating real signals: {e}")
             return None
 
+    async def generate_trading_signal(self, 
+                                    symbol: str,
+                                    include_market_context: bool = True,
+                                    apply_production_adjustments: bool = True) -> Dict[str, Any]:
+        """
+        Generate comprehensive trading signal with ML prediction and market context
+        
+        This is the main interface for base trading apps to get signals without
+        handling technical calculations. Implements the two-layer architecture:
+        1. Enhanced Strategy Layer: ML + Technical signals
+        2. Production Decision Layer: Market context adjustments
+        
+        Args:
+            symbol: Trading symbol to analyze
+            include_market_context: Include market regime analysis
+            apply_production_adjustments: Apply market context confidence adjustments
+            
+        Returns:
+            Comprehensive signal with confidence, reasoning, and metadata
+        """
+        try:
+            print(f"[SIGNAL_GEN] Generating trading signal for {symbol}")
+            
+            # Ensure strategy exists for symbol
+            if symbol not in self.strategies:
+                self.create_enhanced_strategy(symbol)
+            
+            strategy = self.strategies[symbol]
+            
+            # Get market data for signal generation
+            end_date = dt.datetime.now()
+            start_date = end_date - dt.timedelta(days=60)  # 60 days for signal calculation
+            
+            market_data = self.data_provider.get_market_data(
+                symbols=[symbol],
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            if symbol not in market_data or len(market_data[symbol]) < 20:
+                return {
+                    'symbol': symbol,
+                    'signal_type': 'HOLD',
+                    'action': 'HOLD',
+                    'confidence': 0.0,
+                    'strength': 0.0,
+                    'reasoning': 'Insufficient market data for signal generation',
+                    'market_context': None,
+                    'timestamp': end_date.isoformat(),
+                    'success': False
+                }
+            
+            data = market_data[symbol]
+            current_timestamp = data.index[-1]
+            
+            # Layer 1: Enhanced Strategy Signal Generation (ML + Technical)
+            print(f"[SIGNAL_GEN] Generating enhanced ML+Technical signal...")
+            enhanced_signal = strategy.generate_signal(data, current_timestamp)
+            
+            # Layer 2: Market Context Analysis (if requested)
+            market_context = None
+            if include_market_context:
+                print(f"[SIGNAL_GEN] Analyzing market context...")
+                try:
+                    market_context = await self.analyze_symbol_market_context(symbol)
+                except Exception as e:
+                    print(f"[SIGNAL_GEN] Market context analysis failed: {e}")
+                    market_context = None
+            
+            # Layer 3: Production Decision with Market Context Adjustments
+            final_signal = enhanced_signal
+            confidence_multiplier = 1.0
+            additional_reasoning = []
+            
+            if apply_production_adjustments and market_context:
+                print(f"[SIGNAL_GEN] Applying production adjustments...")
+                
+                # Market regime adjustments
+                if market_context.get('market_regime') == 'BULL':
+                    spy_corr = market_context.get('spy_correlation', 0)
+                    if spy_corr > 0.5:
+                        confidence_multiplier *= 1.3
+                        additional_reasoning.append(f'Bull market + correlation ({spy_corr:.2f})')
+                elif market_context.get('market_regime') == 'BEAR':
+                    confidence_multiplier *= 0.7
+                    additional_reasoning.append('Bear market caution')
+                
+                # Beta adjustments
+                spy_beta = market_context.get('spy_beta', 1.0)
+                if spy_beta > 1.2:
+                    confidence_multiplier *= 1.1
+                    additional_reasoning.append(f'High beta stock ({spy_beta:.2f})')
+                
+                # Feature analysis strength
+                feature_strength = market_context.get('feature_analysis', {}).get('strength', 0.5)
+                if feature_strength > 0.7:
+                    confidence_multiplier *= 1.2
+                    additional_reasoning.append(f'Strong feature analysis ({feature_strength:.2f})')
+                
+                # Apply confidence adjustments
+                final_confidence = min(0.95, enhanced_signal.confidence * confidence_multiplier)
+                
+                # Create adjusted signal
+                from interfaces.trading_strategy import TradingSignal, SignalType
+                final_signal = TradingSignal(
+                    symbol=symbol,
+                    timestamp=current_timestamp,
+                    signal_type=enhanced_signal.signal_type,
+                    confidence=final_confidence,
+                    strength=enhanced_signal.strength,
+                    source=f'{enhanced_signal.source}_PRODUCTION',
+                    metadata={
+                        **enhanced_signal.metadata,
+                        'original_confidence': enhanced_signal.confidence,
+                        'confidence_multiplier': confidence_multiplier,
+                        'market_adjustments': additional_reasoning
+                    }
+                )
+            
+            # Convert to action string
+            if final_signal.signal_type.name == 'BUY':
+                action = 'BUY'
+            elif final_signal.signal_type.name == 'SELL':
+                action = 'SELL'
+            else:
+                action = 'HOLD'
+            
+            # Build comprehensive reasoning
+            reasoning_parts = [f"Enhanced Strategy: {final_signal.source}"]
+            reasoning_parts.append(f"Base confidence: {enhanced_signal.confidence:.2f}")
+            
+            if additional_reasoning:
+                reasoning_parts.extend(additional_reasoning)
+                reasoning_parts.append(f"Adjusted confidence: {final_signal.confidence:.2f}")
+            
+            if 'reason' in final_signal.metadata:
+                reasoning_parts.append(final_signal.metadata['reason'])
+            
+            # Return comprehensive signal result
+            result = {
+                'symbol': symbol,
+                'signal_type': final_signal.signal_type.name,
+                'action': action,
+                'confidence': final_signal.confidence,
+                'strength': final_signal.strength,
+                'reasoning': '; '.join(reasoning_parts),
+                'market_context': market_context,
+                'timestamp': current_timestamp.isoformat(),
+                'metadata': {
+                    'enhanced_signal_metadata': final_signal.metadata,
+                    'market_adjustments_applied': apply_production_adjustments and market_context is not None,
+                    'confidence_multiplier': confidence_multiplier,
+                    'source_strategy': final_signal.source
+                },
+                'success': True
+            }
+            
+            print(f"[SIGNAL_GEN] Signal generated successfully for {symbol}")
+            print(f"             Action: {action} (confidence: {final_signal.confidence:.2f})")
+            
+            return result
+            
+        except Exception as e:
+            error_msg = f"Signal generation failed for {symbol}: {e}"
+            print(f"[SIGNAL_GEN] {error_msg}")
+            
+            return {
+                'symbol': symbol,
+                'signal_type': 'HOLD',
+                'action': 'HOLD',
+                'confidence': 0.0,
+                'strength': 0.0,
+                'reasoning': error_msg,
+                'market_context': None,
+                'timestamp': dt.datetime.now().isoformat(),
+                'success': False,
+                'error': str(e)
+            }
+    
+    async def analyze_symbol_market_context(self, symbol: str) -> Dict[str, Any]:
+        """
+        Analyze market context for a specific symbol
+        
+        This is a helper method for market context analysis used in signal generation.
+        
+        Args:
+            symbol: Trading symbol to analyze
+            
+        Returns:
+            Market context analysis including regime, correlations, and feature analysis
+        """
+        try:
+            end_date = dt.datetime.now()
+            start_date = end_date - dt.timedelta(days=180)  # 6 months for context
+            
+            # Get market context analysis
+            market_context = self.market_analyzer.analyze_market_context(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            # Get enhanced features for feature analysis
+            enhanced_features = self.feature_engineer.create_enhanced_features(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                include_market_context=True
+            )
+            
+            # Calculate feature analysis strength
+            feature_strength = 0.5  # Default
+            if enhanced_features.features is not None and len(enhanced_features.features) > 0:
+                # Calculate feature strength based on feature variance and completeness
+                feature_variance = np.var(enhanced_features.features, axis=0)
+                feature_strength = min(1.0, np.mean(feature_variance) * 10)  # Scale appropriately
+            
+            return {
+                'spy_correlation': market_context.spy_correlation,
+                'qqq_correlation': market_context.qqq_correlation,
+                'spy_beta': market_context.spy_beta,
+                'qqq_beta': market_context.qqq_beta,
+                'market_regime': market_context.market_regime,
+                'volatility_regime': market_context.volatility_regime,
+                'sector_strength': market_context.sector_strength,
+                'market_indicators': market_context.market_indicators,
+                'feature_analysis': {
+                    'strength': feature_strength,
+                    'feature_count': len(enhanced_features.feature_names),
+                    'sample_count': len(enhanced_features.features) if enhanced_features.features is not None else 0
+                }
+            }
+            
+        except Exception as e:
+            print(f"[MARKET_CONTEXT] Analysis failed for {symbol}: {e}")
+            return {
+                'spy_correlation': 0.0,
+                'qqq_correlation': 0.0,
+                'spy_beta': 1.0,
+                'qqq_beta': 1.0,
+                'market_regime': 'NEUTRAL',
+                'volatility_regime': 'NORMAL',
+                'sector_strength': 0.5,
+                'market_indicators': {},
+                'feature_analysis': {'strength': 0.5, 'feature_count': 0, 'sample_count': 0}
+            }
+    
     def get_system_status(self) -> Dict[str, Any]:
         """Get comprehensive system status for production components"""
         return {
