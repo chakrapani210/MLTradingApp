@@ -1,0 +1,49 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h2>Paper Trading</h2>
+<form method="post" action="/paper/run">
+  <label>Tickers (comma separated): <input name="tickers" value="{{ tickers }}" style="width:300px"></label>
+  <button type="submit">Run Trade</button>
+</form>
+<section class="tabs">
+  <div class="tab-buttons">
+    <button data-tab="status" class="active">Account Status</button>
+    <button data-tab="transactions">Transactions</button>
+  </div>
+  <div class="tab-content active" id="tab-status">
+    <h3>Summary</h3>
+    <ul>
+      <li>Cash: {{ summary.current_cash | round(2) }}</li>
+      <li>Portfolio Value: {{ summary.current_portfolio_value | round(2) }}</li>
+      <li>Total Equity: {{ summary.current_total_equity | round(2) }}</li>
+      <li>Total Return %: {{ summary.total_return_pct | round(2) }}%</li>
+      <li>Positions: {{ summary.positions_count }}</li>
+      <li>Total Transactions: {{ summary.total_transactions }}</li>
+    </ul>
+    <h3>Positions</h3>
+    {% if positions %}
+    <table><tr><th>Symbol</th><th>Qty</th><th>Avg Price</th><th>Mkt Value</th><th>Unreal PnL</th></tr>
+    {% for p in positions %}
+      <tr><td>{{ p.symbol }}</td><td>{{ p.quantity }}</td><td>{{ p.avg_price|round(2) }}</td><td>{{ p.market_value|round(2) }}</td><td>{{ p.unrealized_pnl|round(2) }}</td></tr>
+    {% endfor %}
+    </table>
+    {% else %}<p>No positions.</p>{% endif %}
+  </div>
+  <div class="tab-content" id="tab-transactions">
+    <h3>Recent Transactions</h3>
+    {% if transactions %}
+    <table><tr><th>Time</th><th>Type</th><th>Symbol</th><th>Qty</th><th>Price</th><th>Amount</th><th>Balance After</th></tr>
+    {% for t in transactions %}
+      <tr><td>{{ t.timestamp }}</td><td>{{ t.transaction_type }}</td><td>{{ t.symbol }}</td><td>{{ t.quantity }}</td><td>{{ t.price|round(2) }}</td><td>{{ t.amount|round(2) }}</td><td>{{ t.account_balance_after|round(2) }}</td></tr>
+    {% endfor %}
+    </table>
+    {% else %}<p>No transactions yet.</p>{% endif %}
+  </div>
+</section>
+<script>
+const btns = document.querySelectorAll('.tab-buttons button');
+btns.forEach(b=>b.addEventListener('click',()=>{btns.forEach(x=>x.classList.remove('active'));b.classList.add('active');
+ document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
+ document.getElementById('tab-'+b.dataset.tab).classList.add('active');}));
+</script>
+{% endblock %}
