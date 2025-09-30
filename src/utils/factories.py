@@ -11,7 +11,6 @@ import logging
 from src.interfaces.data_provider import DataProvider
 from src.interfaces.signal_generator import SignalGenerator
 from src.interfaces.trading_strategy import TradingStrategy
-from src.interfaces.backtester import Backtester
 from src.interfaces.risk_manager import RiskManager
 
 # Import concrete implementations
@@ -249,34 +248,6 @@ class TradingStrategyFactory(ComponentFactory):
         return list(self.SUPPORTED_STRATEGIES.keys())
 
 
-class BacktesterFactory(ComponentFactory):
-    """
-    Factory for creating backtester instances
-    Placeholder for future implementation
-    """
-    
-    SUPPORTED_BACKTESTERS = {
-        # Will be populated as backtesters are implemented
-        # 'vectorized': VectorizedBacktester,
-        # 'event_driven': EventDrivenBacktester,
-    }
-    
-    def create(self, backtester_type: str, config: Dict[str, Any]) -> Backtester:
-        """
-        Create a backtester instance
-        
-        Args:
-            backtester_type: Type of backtester
-            config: Backtester configuration
-            
-        Returns:
-            Backtester instance
-        """
-        raise NotImplementedError("Backtester factory not yet implemented")
-    
-    def get_supported_types(self) -> List[str]:
-        """Get supported backtester types"""
-        return list(self.SUPPORTED_BACKTESTERS.keys())
 
 
 class RiskManagerFactory(ComponentFactory):
@@ -323,7 +294,6 @@ class TradingSystemFactory:
         self.data_provider_factory = DataProviderFactory()
         self.signal_generator_factory = SignalGeneratorFactory()
         self.trading_strategy_factory = TradingStrategyFactory()
-        self.backtester_factory = BacktesterFactory()
         self.risk_manager_factory = RiskManagerFactory()
         
         logger.info("TradingSystemFactory initialized")
@@ -375,7 +345,7 @@ class TradingSystemFactory:
             'data_providers': self.data_provider_factory.get_supported_types(),
             'signal_generators': self.signal_generator_factory.get_supported_types(),
             'trading_strategies': self.trading_strategy_factory.get_supported_types(),
-            'backtesters': self.backtester_factory.get_supported_types(),
+            'backtesters': [],  # removed in lean build
             'risk_managers': self.risk_manager_factory.get_supported_types()
         }
     

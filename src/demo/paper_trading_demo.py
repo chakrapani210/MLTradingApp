@@ -11,9 +11,13 @@ from pathlib import Path
 import pandas as pd
 from typing import Optional
 
-# Add project root to path (now we're in src/demo, so go up two levels)
+# Add project root and src directory to path so package imports (trading.*, src.*) resolve
 project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
+src_dir = project_root / "src"
+for p in [project_root, src_dir]:
+    p_str = str(p)
+    if p_str not in sys.path:
+        sys.path.insert(0, p_str)
 
 from config_manager import get_trading_symbols
 from src.enhanced_orchestrator import ProductionTradingOrchestrator
@@ -34,8 +38,17 @@ class UnifiedPaperTradingDemo(TradingAppBase):
         self.paper_config = PaperTradingConfig(
             initial_cash=100000.0,
             commission_rate=0.0,
-            slippage_rate=0.001
+            slippage_rate=0.001,
+            persistence_file=os.path.join("data", "paper_account_state.json")
         )
+
+        # Ensure persistence directory exists early
+        persistence_dir = os.path.dirname(self.paper_config.persistence_file)
+        if persistence_dir and not os.path.exists(persistence_dir):
+            try:
+                os.makedirs(persistence_dir, exist_ok=True)
+            except Exception as e:
+                print(f"⚠️ Could not create persistence directory '{persistence_dir}': {e}")
         
         # Initialize base class
         super().__init__(starting_capital=100000.0, commission_rate=0.0)
@@ -61,6 +74,40 @@ class UnifiedPaperTradingDemo(TradingAppBase):
         Run demo in specified mode (delegates to base class)
         """
         await self.run_trading_mode(mode, symbol_limit)
+
+    async def health_check(self) -> dict:
+        """Quick health check for data provider and orchestrator components."""
+        results = {
+            'data_provider': False,
+            'sample_symbol': None,
+            'price_lookup': None,
+            'historical_data': None,
+            'orchestrator_initialized': hasattr(self, 'production_orchestrator'),
+            'strategies_initialized': len(getattr(self, 'trading_strategies', {})),
+            'errors': []
+        }
+        try:
+            if hasattr(self.production_orchestrator, 'data_provider'):
+                dp = self.production_orchestrator.data_provider
+                results['data_provider'] = True
+                if self.symbols:
+                    sym = self.symbols[0]
+                    results['sample_symbol'] = sym
+                    try:
+                        price = dp.get_current_price(sym)
+                        results['price_lookup'] = float(price) if price else None
+                    except Exception as e:
+                        results['errors'].append(f'price_lookup:{e}')
+                    try:
+                        end_date = pd.Timestamp.now()
+                        start_date = end_date - pd.Timedelta(days=5)
+                        hist = dp.get_historical_data(sym, start_date.to_pydatetime(), end_date.to_pydatetime())
+                        results['historical_data'] = len(hist) if hist is not None else 0
+                    except Exception as e:
+                        results['errors'].append(f'history:{e}')
+        except Exception as e:
+            results['errors'].append(str(e))
+        return results
     
     async def _run_simple_mode(self):
         """Simple mode: Manual orders with real prices"""
@@ -373,6 +420,9 @@ def show_help():
 🎯 UNIFIED PAPER TRADING DEMO
 
 Usage: python paper_trading_demo.py [mode] [symbols]
+
+Special Commands:
+    health     - Run quick system/data health check
 
 Modes:
   simple     - Manual orders with real prices (quick test)
@@ -694,6 +744,21 @@ async def main():
     mode = args[0] if args else 'production'
     symbol_limit = int(args[1]) if len(args) > 1 and args[1].isdigit() else 3
     
+    if mode == 'health':
+        demo = UnifiedPaperTradingDemo()
+        results = await demo.health_check()
+        print("\n🩺 HEALTH CHECK RESULTS")
+        print("-----------------------")
+        print(f"Data Provider:        {'OK' if results['data_provider'] else 'FAIL'}")
+        print(f"Orchestrator Init:    {'OK' if results['orchestrator_initialized'] else 'FAIL'}")
+        print(f"Strategies Loaded:    {results['strategies_initialized']}")
+        print(f"Sample Symbol:        {results['sample_symbol']}")
+        print(f"Current Price Lookup: {results['price_lookup']}")
+        print(f"Historical Bars (5d): {results['historical_data']}")
+        if results['errors']:
+            print(f"Errors: {results['errors']}")
+        return
+
     if mode not in ['simple', 'basic', 'production']:
         print(f"❌ Invalid mode: {mode}")
         show_help()

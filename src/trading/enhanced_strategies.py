@@ -11,12 +11,12 @@ import warnings
 from dataclasses import dataclass
 from enum import Enum
 
-from ..interfaces.trading_strategy import TradingStrategy, TradingSignal, Position, Order, OrderType
-from ..interfaces.signal_generator import SignalGenerator, SignalType
-from ..interfaces.model_manager import ModelManagerInterface
-from ..interfaces.risk_manager import RiskManager
-from ..data.providers import YFinanceProvider
-from ..signals.technical import (
+from src.interfaces.trading_strategy import TradingStrategy, TradingSignal, Position, Order, OrderType
+from src.interfaces.signal_generator import SignalGenerator, SignalType
+from src.interfaces.model_manager import ModelManagerInterface
+from src.interfaces.risk_manager import RiskManager
+from src.data.providers import YFinanceProvider
+from src.signals.technical import (
     RSISignalGenerator, MACDSignalGenerator, BollingerBandsSignalGenerator,
     SMACrossoverSignalGenerator, EMASignalGenerator, VolumeAnalysisSignalGenerator
 )

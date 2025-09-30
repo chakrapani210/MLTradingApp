@@ -23,7 +23,7 @@ try:
     from .interfaces.trading_strategy import TradingStrategy, TradingSignal
     from .interfaces.model_manager import ModelManagerInterface
     from .interfaces.risk_manager import RiskManager
-    from .interfaces.backtester import Backtester
+    # Backtester removed in lean build
 except ImportError:
     # Fallback to absolute imports
     from interfaces.data_provider import DataProvider
@@ -31,7 +31,7 @@ except ImportError:
     from interfaces.trading_strategy import TradingStrategy, TradingSignal
     from interfaces.model_manager import ModelManagerInterface
     from interfaces.risk_manager import RiskManager
-    from interfaces.backtester import Backtester
+    # Backtester removed in lean build
 
 # Enhanced implementations
 try:
@@ -52,7 +52,7 @@ try:
         MarketContextAnalyzer, 
         EnhancedFeatureEngineer
     )
-    from .backtesting.enhanced_backtesting import EnhancedBacktester
+    # Backtesting module removed
     from .signals.technical import RSISignalGenerator, MACDSignalGenerator, BollingerBandsSignalGenerator
 except ImportError:
     # Fallback to absolute imports
@@ -73,7 +73,7 @@ except ImportError:
         MarketContextAnalyzer, 
         EnhancedFeatureEngineer
     )
-    from backtesting.enhanced_backtesting import EnhancedBacktester
+    # Backtesting module removed
     from signals.technical import RSISignalGenerator, MACDSignalGenerator, BollingerBandsSignalGenerator
 
 warnings.filterwarnings('ignore')
@@ -87,14 +87,14 @@ class ProductionTradingOrchestrator:
     - Data Layer: Data acquisition, preprocessing, indicators
     - Analysis Layer: Market context, feature engineering
     - Model Layer: ML model management and training
-    - Trading Layer: Strategy execution, backtesting
+    - Trading Layer: Strategy execution (backtesting removed in lean build)
     - Visualization Layer: Chart generation and analysis
     
     Features:
     - Enhanced market context analysis with regime detection
     - 40+ TA-Lib technical indicators
     - ML-ready feature engineering pipeline
-    - Comprehensive backtesting with risk metrics
+    - (Backtesting & simulation code removed for lean production footprint)
     - Modular, testable, production-ready architecture
     """
     
@@ -154,14 +154,9 @@ class ProductionTradingOrchestrator:
         print(f"[INIT] Model layer initialized")
     
     def _initialize_trading_layer(self):
-        """Initialize trading layer components"""
-        self.backtester = EnhancedBacktester(
-            data_provider=self.data_provider,
-            initial_cash=self.starting_capital,
-            commission_rate=self.commission_rate,
-            slippage_rate=self.slippage_rate
-        )
-        print(f"[INIT] Trading layer initialized")
+        """Initialize trading layer (placeholder – backtester removed)."""
+        self.backtester = None  # retained attribute for compatibility
+        print("[INIT] Trading layer initialized (backtesting removed)")
     
     def _initialize_visualization_layer(self):
         """Initialize visualization layer components"""
@@ -429,64 +424,11 @@ class ProductionTradingOrchestrator:
             print(f"[MARKET_ANALYSIS] Analysis failed for {symbol}: {e}")
             return {'success': False, 'error': str(e)}
     
-    def run_comprehensive_backtest(self, 
-                                  symbol: str,
-                                  backtest_period_months: int = 6,
-                                  benchmark_symbol: str = 'SPY',
-                                  rebalance_frequency: str = 'daily') -> Dict[str, Any]:
-        """
-        Run comprehensive backtest with all features
-        
-        This method delegates to the simulation package for clean separation.
-        
-        Args:
-            symbol: Trading symbol
-            backtest_period_months: Backtest period in months
-            benchmark_symbol: Benchmark for comparison
-            rebalance_frequency: Rebalancing frequency
-            
-        Returns:
-            Comprehensive backtest results
-        """
-        from simulation.enhanced_backtesting_runner import EnhancedBacktestingRunner
-        backtest_runner = EnhancedBacktestingRunner(self)
-        return backtest_runner.run_comprehensive_backtest(
-            symbol=symbol,
-            backtest_period_months=backtest_period_months,
-            benchmark_symbol=benchmark_symbol,
-            rebalance_frequency=rebalance_frequency
-        )
+    def run_comprehensive_backtest(self, *args, **kwargs):  # type: ignore[override]
+        raise RuntimeError("Backtesting functionality has been removed from this lean production build.")
     
-    def run_complete_enhanced_simulation(self, 
-                                       symbol: str,
-                                       simulation_months: int = 6,
-                                       order_sizing_strategy: str = "percentage",
-                                       force_retrain_ml: bool = False,
-                                       include_market_analysis: bool = True) -> Dict[str, Any]:
-        """
-        Run complete enhanced simulation with all features
-        
-        This method delegates to the simulation package for clean separation.
-        
-        Args:
-            symbol: Trading symbol
-            simulation_months: Simulation period in months
-            order_sizing_strategy: Order sizing strategy
-            force_retrain_ml: Force ML model retraining
-            include_market_analysis: Include market context analysis
-            
-        Returns:
-            Complete simulation results with all features
-        """
-        from .simulation.enhanced_simulation import EnhancedTradingSimulator
-        simulator = EnhancedTradingSimulator(self)
-        return simulator.run_complete_enhanced_simulation(
-            symbol=symbol,
-            simulation_months=simulation_months,
-            order_sizing_strategy=order_sizing_strategy,
-            force_retrain_ml=force_retrain_ml,
-            include_market_analysis=include_market_analysis
-        )
+    def run_complete_enhanced_simulation(self, *args, **kwargs):  # type: ignore[override]
+        raise RuntimeError("Simulation functionality has been removed from this lean production build.")
     
     def _categorize_features(self, feature_names: List[str]) -> Dict[str, int]:
         """Categorize features by type"""
@@ -624,7 +566,8 @@ class ProductionTradingOrchestrator:
             "active_strategies": len(self.strategies),
             "total_symbols_analyzed": len(self.symbols),
             "models_trained": len(self.model_manager.list_models()),
-            "backtest_history": len(self.performance_history),
+            # Renamed from backtest_history for lean build clarity
+            "performance_snapshots": len(self.performance_history),
             "system_uptime": dt.datetime.now().isoformat(),
             "capital_utilization": {
                 "starting_capital": self.starting_capital,
@@ -650,15 +593,7 @@ class ProductionTradingOrchestrator:
         
         print("[CLEANUP] Resource cleanup completed")
     
-    def get_simulation_runner(self):
-        """Get simulation runner for comprehensive testing capabilities"""
-        from .simulation.simulation_runner import SimulationRunner
-        return SimulationRunner(self)
-    
-    def get_backtest_runner(self):
-        """Get backtesting runner for focused performance evaluation"""
-        from .simulation.enhanced_backtesting_runner import EnhancedBacktestingRunner
-        return EnhancedBacktestingRunner(self)
+    # Simulation/backtest runner helpers removed in lean build
 
     def create_trading_chart(self, symbol: str = "AAPL", timeframe: str = "1D", 
                            indicators: Optional[List[str]] = None, period: str = "6mo",
@@ -1031,7 +966,7 @@ class ProductionTradingOrchestrator:
                     'model_training_service': type(self.model_training_service).__name__
                 },
                 'trading_layer': {
-                    'backtester': type(self.backtester).__name__
+                    'backtester': 'Removed'
                 },
                 'visualization_layer': {
                     'chart_generator': type(self.chart_generator).__name__ if self.chart_generator else 'Not Available'
@@ -1070,17 +1005,9 @@ def demonstrate_enhanced_features():
     
     for symbol in test_symbols:
         print(f"\n{'*'*60}")
-        print(f"TESTING ENHANCED FEATURES FOR {symbol}")
+        print(f"LEAN MODE DEMO FOR {symbol} (no simulation)")
         print(f"{'*'*60}")
-        
-        # Run complete enhanced simulation
-        results = orchestrator.run_complete_enhanced_simulation(
-            symbol=symbol,
-            simulation_months=6,
-            order_sizing_strategy="percentage",
-            force_retrain_ml=False,
-            include_market_analysis=True
-        )
+        # Placeholder: live signal generation would be invoked here in real deployment.
     
     # Print system status
     print(f"\n{'='*60}")

@@ -455,7 +455,7 @@ analysis:
     performance_analysis: true
     risk_analysis: true
     attribution_analysis: true
-    backtesting_analysis: true
+    # backtesting_analysis removed in lean build
     
   # Visualization
   visualization:
@@ -471,37 +471,6 @@ analysis:
     auto_email_reports: false
 
 # Environment Configuration
-environment:
-  # Paths
-  paths:
-    models_directory: "models"
-    data_directory: "data"
-    logs_directory: "logs" 
-    reports_directory: "reports"
-    cache_directory: "cache"
-    
-  # Logging
-  logging:
-    level: "INFO"  # DEBUG, INFO, WARNING, ERROR
-    file_logging: true
-    console_logging: true
-    log_rotation: true
-    max_log_size_mb: 100
-    
-  # Performance
-  performance:
-    parallel_processing: true
-    max_workers: 4
-    memory_limit_gb: 8
-    
-  # Development settings
-  development:
-    debug_mode: false
-    profiling_enabled: false
-    test_mode: false
-    paper_trading: true
-
-# External Services (for future integration)
 external_services:
   # Brokerage APIs
   brokers:

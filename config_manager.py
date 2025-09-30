@@ -94,10 +94,6 @@ class ConfigManager:
         """Get data configuration"""
         return self.get('data', {})
     
-    def get_backtesting_config(self) -> Dict[str, Any]:
-        """Get backtesting configuration"""
-        return self.get('backtesting', {})
-    
     def get_risk_management_config(self) -> Dict[str, Any]:
         """Get risk management configuration"""
         return self.get('risk_management', {})

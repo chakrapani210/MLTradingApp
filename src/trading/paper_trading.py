@@ -143,7 +143,8 @@ class PaperTradingConfig:
     max_order_value: float = 50000.0
     allow_fractional_shares: bool = False
     enable_after_hours: bool = False
-    persistence_file: str = "paper_account_state.json"  # File to save account state
+    # File to save account state (relative path will be created automatically)
+    persistence_file: str = os.path.join("data", "paper_account_state.json")
     track_portfolio_snapshots: bool = True  # Enable portfolio value tracking
     # Note: snapshots are taken on every transaction, not time-based
     
@@ -306,8 +307,10 @@ class PaperTradingAccount(TradingAccountInterface):
     def _save_account_state(self):
         """Save current account state to persistence file"""
         try:
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(self.config.persistence_file), exist_ok=True)
+            # Ensure directory exists (support bare filename case)
+            persistence_dir = os.path.dirname(self.config.persistence_file)
+            if persistence_dir and not os.path.exists(persistence_dir):
+                os.makedirs(persistence_dir, exist_ok=True)
             
             # Prepare state data
             state_data = {
@@ -379,6 +382,11 @@ class PaperTradingAccount(TradingAccountInterface):
     def _load_account_state(self):
         """Load account state from persistence file"""
         try:
+            # Ensure directory exists before attempting to load
+            persistence_dir = os.path.dirname(self.config.persistence_file)
+            if persistence_dir and not os.path.exists(persistence_dir):
+                os.makedirs(persistence_dir, exist_ok=True)
+
             if not os.path.exists(self.config.persistence_file):
                 print(f"[PAPER_ACCOUNT] No existing state file found, starting fresh")
                 return

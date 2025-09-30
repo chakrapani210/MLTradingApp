@@ -30,7 +30,6 @@ class TestProductionTradingOrchestrator:
         self.mock_model_manager = Mock()
         self.mock_market_analyzer = Mock()
         self.mock_feature_engineer = Mock()
-        self.mock_backtester = Mock()
         
     @patch('src.enhanced_orchestrator.YFinanceProvider')
     @patch('src.enhanced_orchestrator.DataPreprocessor')
@@ -39,8 +38,7 @@ class TestProductionTradingOrchestrator:
     @patch('src.enhanced_orchestrator.EnhancedFeatureEngineer')
     @patch('src.enhanced_orchestrator.EnhancedModelManager')
     @patch('src.enhanced_orchestrator.ModelTrainingService')
-    @patch('src.enhanced_orchestrator.EnhancedBacktester')
-    def test_orchestrator_initialization(self, mock_backtester, mock_model_training, 
+    def test_orchestrator_initialization(self, mock_model_training, 
                                        mock_model_manager, mock_feature_engineer,
                                        mock_market_analyzer, mock_indicator_calc,
                                        mock_preprocessor, mock_data_provider):
@@ -67,7 +65,7 @@ class TestProductionTradingOrchestrator:
         mock_market_analyzer.assert_called_once()
         mock_feature_engineer.assert_called_once()
         mock_model_manager.assert_called_once()
-        mock_backtester.assert_called_once()
+    # Backtester removed in lean build
 
     @patch('src.enhanced_orchestrator.YFinanceProvider')
     @patch('src.enhanced_orchestrator.DataPreprocessor')
@@ -76,8 +74,7 @@ class TestProductionTradingOrchestrator:
     @patch('src.enhanced_orchestrator.EnhancedFeatureEngineer')
     @patch('src.enhanced_orchestrator.EnhancedModelManager')
     @patch('src.enhanced_orchestrator.ModelTrainingService')
-    @patch('src.enhanced_orchestrator.EnhancedBacktester')
-    def test_create_enhanced_strategy(self, mock_backtester, mock_model_training, 
+    def test_create_enhanced_strategy(self, mock_model_training, 
                                     mock_model_manager, mock_feature_engineer,
                                     mock_market_analyzer, mock_indicator_calc,
                                     mock_preprocessor, mock_data_provider):
@@ -111,8 +108,7 @@ class TestProductionTradingOrchestrator:
     @patch('src.enhanced_orchestrator.EnhancedFeatureEngineer')
     @patch('src.enhanced_orchestrator.EnhancedModelManager')
     @patch('src.enhanced_orchestrator.ModelTrainingService')
-    @patch('src.enhanced_orchestrator.EnhancedBacktester')
-    def test_train_ml_model_existing(self, mock_backtester, mock_model_training, 
+    def test_train_ml_model_existing(self, mock_model_training, 
                                    mock_model_manager, mock_feature_engineer,
                                    mock_market_analyzer, mock_indicator_calc,
                                    mock_preprocessor, mock_data_provider):
@@ -145,8 +141,7 @@ class TestProductionTradingOrchestrator:
     @patch('src.enhanced_orchestrator.EnhancedFeatureEngineer')
     @patch('src.enhanced_orchestrator.EnhancedModelManager')
     @patch('src.enhanced_orchestrator.ModelTrainingService')
-    @patch('src.enhanced_orchestrator.EnhancedBacktester')
-    def test_train_ml_model_new(self, mock_backtester, mock_model_training, 
+    def test_train_ml_model_new(self, mock_model_training, 
                               mock_model_manager, mock_feature_engineer,
                               mock_market_analyzer, mock_indicator_calc,
                               mock_preprocessor, mock_data_provider):
@@ -180,8 +175,7 @@ class TestProductionTradingOrchestrator:
     @patch('src.enhanced_orchestrator.EnhancedFeatureEngineer')
     @patch('src.enhanced_orchestrator.EnhancedModelManager')
     @patch('src.enhanced_orchestrator.ModelTrainingService')
-    @patch('src.enhanced_orchestrator.EnhancedBacktester')
-    def test_analyze_market_context(self, mock_backtester, mock_model_training, 
+    def test_analyze_market_context(self, mock_model_training, 
                                   mock_model_manager, mock_feature_engineer,
                                   mock_market_analyzer, mock_indicator_calc,
                                   mock_preprocessor, mock_data_provider):
@@ -234,8 +228,7 @@ class TestProductionTradingOrchestrator:
     @patch('src.enhanced_orchestrator.EnhancedFeatureEngineer')
     @patch('src.enhanced_orchestrator.EnhancedModelManager')
     @patch('src.enhanced_orchestrator.ModelTrainingService')
-    @patch('src.enhanced_orchestrator.EnhancedBacktester')
-    async def test_generate_trading_signal_success(self, mock_backtester, mock_model_training, 
+    async def test_generate_trading_signal_success(self, mock_model_training, 
                                                  mock_model_manager, mock_feature_engineer,
                                                  mock_market_analyzer, mock_indicator_calc,
                                                  mock_preprocessor, mock_data_provider):
@@ -293,8 +286,7 @@ class TestProductionTradingOrchestrator:
     @patch('src.enhanced_orchestrator.EnhancedFeatureEngineer')
     @patch('src.enhanced_orchestrator.EnhancedModelManager')
     @patch('src.enhanced_orchestrator.ModelTrainingService')
-    @patch('src.enhanced_orchestrator.EnhancedBacktester')
-    async def test_generate_trading_signal_insufficient_data(self, mock_backtester, mock_model_training, 
+    async def test_generate_trading_signal_insufficient_data(self, mock_model_training, 
                                                            mock_model_manager, mock_feature_engineer,
                                                            mock_market_analyzer, mock_indicator_calc,
                                                            mock_preprocessor, mock_data_provider):
@@ -321,8 +313,7 @@ class TestProductionTradingOrchestrator:
     @patch('src.enhanced_orchestrator.EnhancedFeatureEngineer')
     @patch('src.enhanced_orchestrator.EnhancedModelManager')
     @patch('src.enhanced_orchestrator.ModelTrainingService')
-    @patch('src.enhanced_orchestrator.EnhancedBacktester')
-    async def test_analyze_symbol_market_context(self, mock_backtester, mock_model_training, 
+    async def test_analyze_symbol_market_context(self, mock_model_training, 
                                                mock_model_manager, mock_feature_engineer,
                                                mock_market_analyzer, mock_indicator_calc,
                                                mock_preprocessor, mock_data_provider):
@@ -367,8 +358,7 @@ class TestProductionTradingOrchestrator:
     @patch('src.enhanced_orchestrator.EnhancedFeatureEngineer')
     @patch('src.enhanced_orchestrator.EnhancedModelManager')
     @patch('src.enhanced_orchestrator.ModelTrainingService')
-    @patch('src.enhanced_orchestrator.EnhancedBacktester')
-    def test_get_system_status(self, mock_backtester, mock_model_training, 
+    def test_get_system_status(self, mock_model_training, 
                              mock_model_manager, mock_feature_engineer,
                              mock_market_analyzer, mock_indicator_calc,
                              mock_preprocessor, mock_data_provider):
@@ -404,8 +394,7 @@ class TestProductionTradingOrchestrator:
     @patch('src.enhanced_orchestrator.EnhancedFeatureEngineer')
     @patch('src.enhanced_orchestrator.EnhancedModelManager')
     @patch('src.enhanced_orchestrator.ModelTrainingService')
-    @patch('src.enhanced_orchestrator.EnhancedBacktester')
-    def test_categorize_features(self, mock_backtester, mock_model_training, 
+    def test_categorize_features(self, mock_model_training, 
                                 mock_model_manager, mock_feature_engineer,
                                 mock_market_analyzer, mock_indicator_calc,
                                 mock_preprocessor, mock_data_provider):
@@ -435,8 +424,7 @@ class TestProductionTradingOrchestrator:
     @patch('src.enhanced_orchestrator.EnhancedFeatureEngineer')
     @patch('src.enhanced_orchestrator.EnhancedModelManager')
     @patch('src.enhanced_orchestrator.ModelTrainingService')
-    @patch('src.enhanced_orchestrator.EnhancedBacktester')
-    def test_validate_system_health(self, mock_backtester, mock_model_training, 
+    def test_validate_system_health(self, mock_model_training, 
                                    mock_model_manager, mock_feature_engineer,
                                    mock_market_analyzer, mock_indicator_calc,
                                    mock_preprocessor, mock_data_provider):

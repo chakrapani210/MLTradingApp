@@ -20,7 +20,7 @@ from src.interfaces.signal_generator import SignalGenerator, TradingSignal, Sign
 from src.interfaces.trading_strategy import TradingStrategy, Order, OrderType, OrderSide, Position, StrategyPerformance
 from src.interfaces.model_manager import ModelManagerInterface, ModelMetadata, ModelStatus
 from src.interfaces.risk_manager import RiskManager
-from src.interfaces.backtester import Backtester, BacktestConfig, BacktestResult
+## Backtester interfaces removed in lean build; import dropped
 
 
 class TestDataProviderInterface(unittest.TestCase):

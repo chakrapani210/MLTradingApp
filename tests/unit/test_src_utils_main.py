@@ -22,11 +22,10 @@ from src.utils.factories import (
     DataProviderFactory,
     SignalGeneratorFactory,
     TradingStrategyFactory,
-    BacktesterFactory,
     ComponentFactory
 )
-from src.enhanced_orchestrator import EnhancedTradingSystemOrchestrator
-from src.main_simple import TradingSystemOrchestrator, ConfigManager
+from src.enhanced_orchestrator import ProductionTradingOrchestrator
+from config_manager import ConfigManager
 
 
 class TestDataProviderFactory(unittest.TestCase):
@@ -182,38 +181,7 @@ class TestTradingStrategyFactory(unittest.TestCase):
         self.assertTrue(hasattr(self.factory, 'get_supported_types'))
 
 
-class TestBacktesterFactory(unittest.TestCase):
-    """Test BacktesterFactory functionality"""
-    
-    def setUp(self):
-        """Set up test fixtures"""
-        self.factory = BacktesterFactory()
-        
-    def test_supported_backtester_types(self):
-        """Test supported backtester types"""
-        supported = self.factory.get_supported_types()
-        
-        self.assertIsInstance(supported, list)
-        self.assertGreater(len(supported), 0)
-        
-    def test_create_backtester_with_dependencies(self):
-        """Test creating backtester with dependencies"""
-        # Mock dependencies
-        mock_strategy = Mock()
-        mock_data_provider = Mock()
-        mock_risk_manager = Mock()
-        
-        config = {
-            'strategy': mock_strategy,
-            'data_provider': mock_data_provider,
-            'risk_manager': mock_risk_manager,
-            'starting_capital': 100000.0,
-            'commission_rate': 0.001
-        }
-        
-        # Test factory interface exists
-        self.assertTrue(hasattr(self.factory, 'create'))
-        self.assertTrue(hasattr(self.factory, 'get_supported_types'))
+## Backtester tests removed in lean build (backtesting code eliminated)
 
 
 class TestConfigManager(unittest.TestCase):
@@ -257,8 +225,13 @@ class TestConfigManager(unittest.TestCase):
     def test_config_loading(self):
         """Test configuration loading"""
         # Mock the config file path
-        with patch('src.main_simple.os.path.join', return_value=self.temp_file.name):
-            config_manager = ConfigManager()
+        # Initialize config manager pointing to temporary file
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(os.path.dirname(self.temp_file.name))
+            config_manager = ConfigManager(config_path=os.path.basename(self.temp_file.name))
+        finally:
+            os.chdir(original_cwd)
             
         # Test getting nested configuration values
         provider = config_manager.get('data.provider')
@@ -272,8 +245,12 @@ class TestConfigManager(unittest.TestCase):
         
     def test_config_get_with_default(self):
         """Test getting configuration with default value"""
-        with patch('src.main_simple.os.path.join', return_value=self.temp_file.name):
-            config_manager = ConfigManager()
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(os.path.dirname(self.temp_file.name))
+            config_manager = ConfigManager(config_path=os.path.basename(self.temp_file.name))
+        finally:
+            os.chdir(original_cwd)
             
         # Existing key
         provider = config_manager.get('data.provider', 'default_provider')
@@ -285,8 +262,12 @@ class TestConfigManager(unittest.TestCase):
         
     def test_config_nested_access(self):
         """Test nested configuration access"""
-        with patch('src.main_simple.os.path.join', return_value=self.temp_file.name):
-            config_manager = ConfigManager()
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(os.path.dirname(self.temp_file.name))
+            config_manager = ConfigManager(config_path=os.path.basename(self.temp_file.name))
+        finally:
+            os.chdir(original_cwd)
             
         # Deep nested access
         rsi_period = config_manager.get('signals.rsi.period')
@@ -296,102 +277,14 @@ class TestConfigManager(unittest.TestCase):
         self.assertEqual(macd_fast, 12)
 
 
-class TestTradingSystemOrchestrator(unittest.TestCase):
-    """Test TradingSystemOrchestrator functionality"""
-    
-    def setUp(self):
-        """Set up test fixtures"""
-        # Mock config
-        self.mock_config = Mock()
-        self.mock_config.get.side_effect = lambda key, default=None: {
-            'data.provider': 'yfinance',
-            'data.symbols': ['AAPL', 'GOOGL'],
-            'trading.starting_capital': 100000,
-            'signals.enabled': ['rsi', 'macd']
-        }.get(key, default)
-        
-        # Mock get_config function
-        with patch('src.main_simple.get_config', return_value=self.mock_config):
-            self.orchestrator = TradingSystemOrchestrator()
-            
-    def test_initialization(self):
-        """Test orchestrator initialization"""
-        self.assertIsNotNone(self.orchestrator.logger)
-        self.assertEqual(self.orchestrator.config, self.mock_config)
-        
-    def test_system_status(self):
-        """Test getting system status"""
-        # Mock component initialization
-        with patch.object(self.orchestrator, '_initialize_components'):
-            self.orchestrator.data_provider = Mock()
-            self.orchestrator.data_provider.is_available.return_value = True
-            self.orchestrator.signal_generators = [Mock(), Mock()]
-            
-            status = self.orchestrator.get_system_status()
-            
-        self.assertIsInstance(status, dict)
-        self.assertIn('data_provider', status)
-        self.assertIn('signal_generators', status)
-        self.assertIn('components_initialized', status)
-        
-    def test_run_analysis_basic(self):
-        """Test basic analysis run"""
-        # Mock dependencies
-        self.orchestrator.data_provider = Mock()
-        self.orchestrator.preprocessor = Mock()
-        self.orchestrator.indicator_calculator = Mock()
-        self.orchestrator.signal_generators = [Mock()]
-        
-        # Mock data flow
-        sample_data = pd.DataFrame({
-            'close': [100, 101, 102, 103, 104]
-        }, index=pd.date_range('2023-01-01', periods=5))
-        
-        self.orchestrator.data_provider.validate_symbol.return_value = True
-        self.orchestrator.data_provider.get_historical_data.return_value = sample_data
-        self.orchestrator.preprocessor.clean_data.return_value = sample_data
-        self.orchestrator.indicator_calculator.calculate_all_indicators.return_value = pd.DataFrame()
-        self.orchestrator.signal_generators[0].generate_signals.return_value = []
-        self.orchestrator.signal_generators[0].is_enabled.return_value = True
-        self.orchestrator.signal_generators[0].get_name.return_value = "Test Generator"
-        
-        # Run analysis
-        result = self.orchestrator.run_analysis(
-            "AAPL",
-            dt.datetime(2023, 1, 1),
-            dt.datetime(2023, 12, 31)
-        )
-        
-        self.assertIsInstance(result, dict)
-        self.assertIn('symbol', result)
-        self.assertIn('analysis_period', result)
-        self.assertIn('price_statistics', result)
-        self.assertIn('signal_summary', result)
-        
-    def test_run_analysis_error_handling(self):
-        """Test error handling in analysis"""
-        # Mock data provider to raise exception
-        self.orchestrator.data_provider = Mock()
-        self.orchestrator.data_provider.validate_symbol.side_effect = Exception("Test error")
-        
-        result = self.orchestrator.run_analysis(
-            "ERROR_SYMBOL",
-            dt.datetime(2023, 1, 1),
-            dt.datetime(2023, 12, 31)
-        )
-        
-        self.assertIn('error', result)
-        self.assertEqual(result['error'], "Test error")
-
-
-class TestEnhancedTradingSystemOrchestrator(unittest.TestCase):
-    """Test EnhancedTradingSystemOrchestrator functionality"""
+class TestProductionTradingOrchestrator(unittest.TestCase):
+    """Test ProductionTradingOrchestrator functionality (lean build)"""
     
     def setUp(self):
         """Set up test fixtures"""
         with patch('src.enhanced_orchestrator.YFinanceProvider'):
             with patch('src.enhanced_orchestrator.EnhancedModelManager'):
-                self.orchestrator = EnhancedTradingSystemOrchestrator(
+                self.orchestrator = ProductionTradingOrchestrator(
                     starting_capital=50000,
                     commission_rate=0.0015,
                     slippage_rate=0.001
@@ -460,25 +353,7 @@ class TestEnhancedTradingSystemOrchestrator(unittest.TestCase):
             
         self.assertIsInstance(result, dict)
         
-    def test_run_backtest(self):
-        """Test backtesting functionality"""
-        # Mock strategy and backtester
-        mock_strategy = Mock()
-        mock_backtester = Mock()
-        mock_backtester.run_backtest.return_value = Mock()
-        
-        self.orchestrator.strategies["TEST"] = mock_strategy
-        
-        with patch('src.enhanced_orchestrator.EnhancedBacktester', return_value=mock_backtester):
-            result = self.orchestrator.run_backtest(
-                strategy_name="TEST",
-                symbols=["AAPL"],
-                start_date=dt.datetime(2023, 1, 1),
-                end_date=dt.datetime(2023, 12, 31)
-            )
-            
-        # Should call backtester
-        mock_backtester.run_backtest.assert_called_once()
+    # Backtesting test removed – backtesting functionality no longer present
 
 
 class TestIntegrationScenarios(unittest.TestCase):
@@ -537,7 +412,7 @@ class TestIntegrationScenarios(unittest.TestCase):
                 with patch('src.enhanced_orchestrator.ModelTrainingService') as mock_training:
                     with patch('src.enhanced_orchestrator.MarketContextAnalyzer') as mock_analyzer:
                         # Initialize system
-                        system = EnhancedTradingSystemOrchestrator()
+                        system = ProductionTradingOrchestrator()
                         
                         # Add symbols and create strategies
                         system.add_symbol("INTEGRATION_TEST")
