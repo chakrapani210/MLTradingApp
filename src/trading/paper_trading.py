@@ -708,13 +708,23 @@ class PaperTradingAccount(TradingAccountInterface):
     def get_performance_summary(self) -> Dict[str, Any]:
         """Get comprehensive performance summary for analysis"""
         if not self._transactions:
+            # Return a full key set even when no transactions yet, to keep UI templates simple
             return {
-                'total_transactions': 0,
-                'total_equity': self._cash,
+                'account_created': self._account_created_at.isoformat(),
+                'last_update': self._last_update.isoformat(),
+                'initial_cash': self.config.initial_cash,
+                'current_cash': self._cash,
+                'current_portfolio_value': 0.0,
+                'current_total_equity': self._cash,
                 'total_return': 0.0,
                 'total_return_pct': 0.0,
+                'total_transactions': 0,
+                'buy_transactions': 0,
+                'sell_transactions': 0,
+                'total_fees_paid': 0.0,
                 'positions_count': 0,
-                'snapshots_count': 0
+                'snapshots_count': len(self._portfolio_snapshots),
+                'trading_days': 0
             }
         
         # Calculate performance metrics

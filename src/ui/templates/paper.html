@@ -13,12 +13,12 @@
   <div class="tab-content active" id="tab-status">
     <h3>Summary</h3>
     <ul>
-      <li>Cash: {{ summary.current_cash | round(2) }}</li>
-      <li>Portfolio Value: {{ summary.current_portfolio_value | round(2) }}</li>
-      <li>Total Equity: {{ summary.current_total_equity | round(2) }}</li>
-      <li>Total Return %: {{ summary.total_return_pct | round(2) }}%</li>
-      <li>Positions: {{ summary.positions_count }}</li>
-      <li>Total Transactions: {{ summary.total_transactions }}</li>
+  <li>Cash: {{ (summary.current_cash or 0)|round(2) }}</li>
+  <li>Portfolio Value: {{ (summary.current_portfolio_value or 0)|round(2) }}</li>
+  <li>Total Equity: {{ (summary.current_total_equity or 0)|round(2) }}</li>
+  <li>Total Return %: {{ (summary.total_return_pct or 0)|round(2) }}%</li>
+  <li>Positions: {{ summary.positions_count or 0 }}</li>
+  <li>Total Transactions: {{ summary.total_transactions or 0 }}</li>
     </ul>
     <h3>Positions</h3>
     {% if positions %}
