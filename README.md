@@ -6,11 +6,25 @@ This is an enhanced version of the original ML Automated Trading system with imp
 
 ## 🚀 Recent Enhancements
 
-- **Optimized Training Data**: 12-month optimal training period (vs original 10+ years)
-- **Dynamic Retraining**: Bi-weekly retraining frequency for optimal performance  
-- **Enhanced Performance**: 94% return on Tesla (Jul-Dec 2025) with 3.68 Sharpe ratio
-- **Technical Analysis**: Comprehensive indicator importance analysis
-- **Multi-Stock Support**: Individual models per stock for better performance
+- Automated daily scheduled trading script (2:30 PM US Central) using pre-trained models
+
+## Scheduled Daily Trading (2:30 PM CST)
+To enable an automatic run that fetches market data and places orders based on model predictions:
+
+1. Review / modify `scripts/scheduled_trading_task.py` for sizing logic.
+2. Create the Windows Scheduled Task (machine time should align with Central Time or adjust trigger time):
+	```powershell
+	powershell -ExecutionPolicy Bypass -File scripts/create_windows_task.ps1 -TaskName MLTrading_Scheduled_1430CST -Time 14:30
+	```
+3. Task runs `python scripts/scheduled_trading_task.py` daily. Logs appear in console history; redirect output if desired:
+	- Edit the PowerShell script and append `> logs\scheduled_run.txt 2>&1` to the argument for persistent logging.
+
+Override run manually:
+```powershell
+python scripts/scheduled_trading_task.py
+```
+
+Note: The script currently places BUY orders only on positive signals; SELL / position reduction logic can be added later.
 
 ## 📊 Performance Highlights
 

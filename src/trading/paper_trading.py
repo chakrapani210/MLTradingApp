@@ -223,6 +223,21 @@ class PaperTradingAccount(TradingAccountInterface):
         self._is_connected = False
         print(f"[PAPER_ACCOUNT] Disconnected and state saved")
         return True
+
+    async def reset_account_state(self) -> bool:
+        """Public async wrapper to fully reset account (cash, positions, trades, transactions, snapshots).
+
+        This differs from existing reset_account (if present) by ensuring persistence file is also removed
+        and a fresh initialization snapshot is captured. Intended for UI-triggered hard resets.
+        """
+        try:
+            self.reset_account()  # reuse existing sync reset logic if available
+            # Re-save fresh state
+            self._save_account_state()
+            return True
+        except Exception as e:
+            print(f"[PAPER_ACCOUNT] Reset failed: {e}")
+            return False
     
     def _take_portfolio_snapshot(self, description: str = "Transaction snapshot"):
         """Take a portfolio value snapshot for tracking over time"""

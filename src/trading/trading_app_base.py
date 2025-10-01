@@ -594,3 +594,294 @@ Features:
   ✅ Risk-based position sizing
   ✅ No simulated data
 """)
+
+    async def refresh_account_prices(self, verbose: bool = False) -> Dict[str, Any]:
+        """Refresh market prices for all current positions and update unrealized PnL.
+
+        This method pulls latest prices (using get_real_price with fallback) and recalculates:
+          - position.market_value
+          - position.unrealized_pnl (market_value - avg_price * quantity)
+        It then forces any performance summary recalculation by returning updated summary.
+        (Persistence will capture new snapshot on next order or explicit save if implemented.)
+        """
+        if not self.account:
+            raise RuntimeError("Account not connected")
+        positions = await self.account.get_all_positions()
+        symbols_to_update = [p.symbol for p in positions if not p.is_flat]
+        updated = 0
+
+        # Batch fetch logic: attempt to pull small historical window once per symbol using data_provider
+        price_cache: Dict[str, float] = {}
+        for sym in symbols_to_update:
+            try:
+                price = self.production_orchestrator.data_provider.get_current_price(sym)
+                if (not price or price <= 0):
+                    # fallback 1-day historical close
+                    end_date = pd.Timestamp.now()
+                    start_date = end_date - pd.Timedelta(days=1)
+                    hist = self.production_orchestrator.data_provider.get_historical_data(
+                        symbol=sym,
+                        start_date=start_date.to_pydatetime(),
+                        end_date=end_date.to_pydatetime()
+                    )
+                    if hist is not None and not hist.empty:
+                        close_col = 'Close' if 'Close' in hist.columns else 'close'
+                        price = float(hist[close_col].iloc[-1])
+                if price and price > 0:
+                    price_cache[sym] = float(price)
+            except Exception as e:
+                if verbose:
+                    print(f"[REFRESH] Failed to batch fetch {sym}: {e}")
+
+        for pos in positions:
+            if pos.is_flat:
+                continue
+            price = price_cache.get(pos.symbol)
+            if price is None:
+                # Final fallback via account provider if available
+                if hasattr(self.account, 'get_market_data'):
+                    try:
+                        md = await self.account.get_market_data(pos.symbol)  # type: ignore[attr-defined]
+                        price = md.get('price') if md else None
+                    except Exception:
+                        price = None
+            if price is None or price <= 0:
+                continue
+            old_mv = pos.market_value
+            pos.market_value = price * pos.quantity
+            pos.unrealized_pnl = pos.market_value - (pos.avg_price * pos.quantity)
+            updated += 1
+            if verbose:
+                print(f"[REFRESH] {pos.symbol}: {price:.2f} mv {old_mv:.2f}->{pos.market_value:.2f} pnl {pos.unrealized_pnl:.2f}")
+
+        # Persist snapshot immediately if account supports snapshot/persistence
+        if hasattr(self.account, '_take_portfolio_snapshot'):
+            try:
+                # type: ignore[attr-defined]
+                self.account._take_portfolio_snapshot("Manual refresh prices")  # noqa: SLF001
+            except Exception as e:
+                if verbose:
+                    print(f"[REFRESH] Snapshot failed: {e}")
+        if hasattr(self.account, '_save_account_state'):
+            try:
+                # type: ignore[attr-defined]
+                self.account._save_account_state()  # noqa: SLF001
+            except Exception as e:
+                if verbose:
+                    print(f"[REFRESH] Save failed: {e}")
+        # Return current performance summary (leveraging account's method if present)
+        if hasattr(self.account, 'get_performance_summary'):
+            return self.account.get_performance_summary()
+        return await self.get_account_performance_summary()
+
+    async def run_scheduled_auto_trading(
+        self,
+        allocation_fraction: float = 0.05,
+        symbol_limit: int | None = None,
+        rule: str = "production_signals",
+        auto_disconnect: bool = False,
+        verbose: bool = True
+    ) -> Dict[str, Any]:
+        """Scheduled auto trading using production signal generation.
+
+        Updated Design:
+          - Uses ProductionTradingOrchestrator.generate_trading_signal() per symbol
+          - Supports BUY & SELL actions
+          - BUY sizing: leverage enhanced strategy order sizing when available; fallback to allocation_fraction * confidence of cash
+          - SELL sizing: if confidence >= 0.6 sell full position else sell proportional (confidence fraction, >=1 share)
+          - Skips HOLD / failed signals gracefully
+
+        Args:
+            allocation_fraction: Base portfolio cash fraction for new BUY positions (0 < f <= 1)
+            symbol_limit: Optional limit to number of symbols processed
+            rule: Rule label (defaults to 'production_signals')
+            auto_disconnect: Disconnect account after completion
+            verbose: Emit detailed logs
+
+        Returns:
+            dict summary with orders, cash deltas, errors
+        """
+        if allocation_fraction <= 0 or allocation_fraction > 1:
+            raise ValueError("allocation_fraction must be between 0 and 1")
+
+        # Ensure account is connected
+        if not self.account:
+            if verbose:
+                print("[AUTO] Account not initialized - connecting...")
+            if not await self.connect_account():
+                raise RuntimeError("Failed to connect trading account for scheduled auto trading")
+
+        start_balance = await self.account.get_account_balance()
+        start_cash = start_balance.cash
+        placed_orders: List[Dict[str, Any]] = []
+        errors: List[str] = []
+
+        symbols = self.symbols if symbol_limit is None else self.symbols[:symbol_limit]
+        run_started = datetime.now()
+
+        if verbose:
+            print(f"\n=== SCHEDULED AUTO TRADING ({rule}) @ {run_started.strftime('%Y-%m-%d %H:%M:%S')} ===")
+            print(f"Allocation fraction per new symbol: {allocation_fraction:.2%}")
+            print(f"Symbols: {', '.join(symbols)}")
+
+        for symbol in symbols:
+            try:
+                if verbose:
+                    print(f"\n[SYMBOL] {symbol}")
+                # Generate production signal with market context & adjustments
+                signal_result = await self.production_orchestrator.generate_trading_signal(
+                    symbol=symbol,
+                    include_market_context=True,
+                    apply_production_adjustments=True
+                )
+
+                if not signal_result.get('success', False):
+                    if verbose:
+                        print(f"  ❌ Signal generation failed: {signal_result.get('reasoning', 'unknown')} ")
+                    continue
+
+                action = signal_result.get('action', 'HOLD')
+                confidence = float(signal_result.get('confidence', 0.0) or 0.0)
+                if action == 'HOLD' or confidence <= 0:
+                    if verbose:
+                        print(f"  ℹ️  HOLD (confidence {confidence:.2f}) - skipping")
+                    continue
+
+                # Get current / real price
+                price = await self.get_real_price(symbol)
+                if not price and hasattr(self.account, 'get_market_data'):
+                    try:
+                        market_data = await self.account.get_market_data(symbol)  # type: ignore[attr-defined]
+                        price = market_data.get('price') if market_data else None
+                    except Exception:
+                        price = None
+                if not price or price <= 0:
+                    if verbose:
+                        print("  ❌ Could not resolve price - skipping")
+                    continue
+
+                position = await self.account.get_position(symbol)
+
+                # Determine quantity
+                quantity = 0
+                try:
+                    strategy = self.trading_strategies.get(symbol)
+                    if strategy is not None:
+                        # Historical data for sizing similar to execute_production_decision
+                        end_date = pd.Timestamp.now()
+                        start_date = end_date - pd.Timedelta(days=60)
+                        price_data = self.data_provider.get_historical_data(
+                            symbol, start_date.to_pydatetime(), end_date.to_pydatetime()
+                        )
+                        if price_data is not None and len(price_data) > 0:
+                            series = price_data['Close'] if 'Close' in price_data.columns else price_data['close']
+                            raw_signal = signal_result  # pass entire dict
+                            base_qty = abs(strategy.order_size_manager.calculate_order_size(symbol, raw_signal, series))
+                            quantity = int(max(base_qty, 1))
+                    if quantity == 0:
+                        # Fallback sizing
+                        balance = await self.account.get_account_balance()
+                        if action == 'BUY':
+                            position_value = balance.cash * allocation_fraction * min(confidence, 1.0)
+                            quantity = max(int(position_value / price), 1)
+                        elif action == 'SELL' and position and not position.is_flat:
+                            qty_conf = int(max(int(position.quantity * max(confidence, 0.1)), 1))
+                            quantity = min(qty_conf, int(position.quantity))
+                except Exception as e:
+                    if verbose:
+                        print(f"  ⚠️  Sizing fallback due to error: {e}")
+                    balance = await self.account.get_account_balance()
+                    if action == 'BUY':
+                        position_value = balance.cash * allocation_fraction * max(confidence, 0.1)
+                        quantity = max(int(position_value / price), 1)
+                    elif action == 'SELL' and position and not position.is_flat:
+                        quantity = max(int(position.quantity * confidence), 1)
+
+                # SELL-specific adjustments
+                if action == 'SELL':
+                    if not position or position.is_flat:
+                        if verbose:
+                            print("  ℹ️  No existing position to SELL - skipping")
+                        continue
+                    quantity = min(quantity, int(position.quantity))
+                    if quantity < 1:
+                        if verbose:
+                            print("  ℹ️  Computed sell quantity <1 - skipping")
+                        continue
+
+                # BUY-specific pre-check: avoid duplicate open if already have position and rule disallows scaling
+                if action == 'BUY' and position and not position.is_flat:
+                    # For now skip scaling; future: allow pyramiding logic
+                    if verbose:
+                        print("  ℹ️  Position already open - skipping additional BUY (scaling disabled)")
+                    continue
+
+                side = OrderSide.BUY if action == 'BUY' else OrderSide.SELL
+                order = Order(
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    order_type=OrderType.MARKET,
+                    metadata={
+                        'mode': 'scheduled_auto',
+                        'rule': rule,
+                        'allocation_fraction': allocation_fraction,
+                        'confidence': confidence,
+                        'action': action,
+                        'signal_type': signal_result.get('signal_type'),
+                        'strength': signal_result.get('strength'),
+                        'reasoning': signal_result.get('reasoning'),
+                        'real_price': price
+                    }
+                )
+
+                execution = await self.account.place_order(order)
+                if execution.is_complete:
+                    placed_orders.append({
+                        'symbol': symbol,
+                        'action': action,
+                        'quantity': execution.filled_quantity,
+                        'price': execution.avg_fill_price,
+                        'confidence': confidence
+                    })
+                    if verbose:
+                        print(f"  ✅ {action} {execution.filled_quantity} @ {execution.avg_fill_price:.2f} (conf {confidence:.2f})")
+                else:
+                    msg = f"Order failed for {symbol}: {execution.error_message}"
+                    errors.append(msg)
+                    if verbose:
+                        print(f"  ❌ {msg}")
+
+            except Exception as e:
+                msg = f"Error processing {symbol}: {e}"
+                errors.append(msg)
+                if verbose:
+                    print(f"  ❌ {msg}")
+
+        end_balance = await self.account.get_account_balance()
+        summary = {
+            'rule': rule,
+            'allocation_fraction': allocation_fraction,
+            'started_at': run_started.isoformat(),
+            'ended_at': datetime.now().isoformat(),
+            'orders_placed_count': len(placed_orders),
+            'orders': placed_orders,
+            'start_cash': start_cash,
+            'end_cash': end_balance.cash,
+            'cash_used': start_cash - end_balance.cash,
+            'errors': errors
+        }
+
+        if verbose:
+            print("\n=== AUTO RUN SUMMARY ===")
+            print(f"Orders placed: {summary['orders_placed_count']}")
+            for o in placed_orders:
+                print(f"  {o['symbol']}: {o['quantity']} @ {o['price']:.2f}")
+            print(f"Cash used: ${summary['cash_used']:,.2f}  Remaining: ${summary['end_cash']:,.2f}")
+            if errors:
+                print(f"Errors: {len(errors)}")
+        
+        if auto_disconnect:
+            await self.disconnect_account()
+
+        return summary

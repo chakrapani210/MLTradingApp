@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from src.trading.paper_trading import PaperTradingAccount, PaperTradingConfig, Order, OrderType, OrderSide
+from src.trading.paper_trading_app import PaperTradingApp
 
 # --- Setup FastAPI and Jinja2 ---
 app = FastAPI(title="Trading UI")
@@ -35,15 +36,17 @@ env = Environment(
     autoescape=select_autoescape(['html', 'xml'])
 )
 
-# Global (singleton) paper account instance reused across requests
-_paper_account: Optional[PaperTradingAccount] = None
+# Global (singleton) PaperTradingApp instance
+_paper_app: Optional[PaperTradingApp] = None
 
-async def get_paper_account() -> PaperTradingAccount:
-    global _paper_account
-    if _paper_account is None:
-        _paper_account = PaperTradingAccount(PaperTradingConfig())
-        await _paper_account.connect()
-    return _paper_account
+async def get_paper_app() -> PaperTradingApp:
+    global _paper_app
+    if _paper_app is None:
+        _paper_app = PaperTradingApp(starting_capital=100000.0)
+        await _paper_app.connect_account()
+    elif not _paper_app.account or not getattr(_paper_app.account, '_is_connected', False):  # type: ignore[attr-defined]
+        await _paper_app.connect_account()
+    return _paper_app
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
 if os.path.exists(STATIC_DIR):
@@ -56,46 +59,106 @@ async def index():
     return HTMLResponse(tpl.render())
 
 @app.get('/paper', response_class=HTMLResponse)
-async def paper_view(tickers: str = 'TSLA'):
-    account = await get_paper_account()
+async def paper_view(reset: str | None = None):
+    app_inst = await get_paper_app()
+    account = app_inst.account
     summary = account.get_performance_summary()
     positions = [p.__dict__ for p in await account.get_all_positions()]
     tx = [t.to_dict() for t in account.get_transactions()][-50:][::-1]
     tpl = env.get_template('paper.html')
-    return HTMLResponse(tpl.render(tickers=tickers, summary=summary, positions=positions, transactions=tx))
+    return HTMLResponse(tpl.render(
+        summary=summary,
+        positions=positions,
+        transactions=tx,
+        symbols=app_inst.symbols,
+        reset=reset
+    ))
 
 @app.post('/paper/run', response_class=HTMLResponse)
-async def run_trade(tickers: str = Form(...)):
-    account = await get_paper_account()
-    symbols = [s.strip().upper() for s in tickers.split(',') if s.strip()]
-    # For MVP: trade first symbol only
-    if not symbols:
-        return RedirectResponse('/paper', status_code=303)
-    symbol = symbols[0]
-    # Simple rule: if no position -> buy 1 share, if have position -> sell 1 share
-    pos = await account.get_position(symbol)
-    qty = 1
-    side = OrderSide.BUY if (not pos or pos.quantity <= 0) else OrderSide.SELL
-    order = Order(symbol=symbol, quantity=qty, order_type=OrderType.MARKET, side=side)
-    await account.place_order(order)
-    return RedirectResponse(f'/paper?tickers={symbol}', status_code=303)
+async def run_auto_trading():
+    app_inst = await get_paper_app()
+    # Allocation fraction via env or default
+    import os
+    try:
+        allocation_fraction = float(os.getenv('UI_AUTO_ALLOC_FRACTION', '0.05'))
+        if allocation_fraction <= 0 or allocation_fraction > 1:
+            raise ValueError
+    except ValueError:
+        allocation_fraction = 0.05
+    await app_inst.run_scheduled_auto_trading(allocation_fraction=allocation_fraction, verbose=True)
+    return RedirectResponse('/paper', status_code=303)
+
+@app.post('/paper/refresh')
+async def refresh_prices():
+    app_inst = await get_paper_app()
+    await app_inst.refresh_account_prices(verbose=True)
+    return RedirectResponse('/paper', status_code=303)
+
+@app.post('/paper/add_symbol')
+async def add_symbol(new_symbol: str = Form(...)):
+    app_inst = await get_paper_app()
+    sym = new_symbol.strip().upper()
+    if sym and sym not in app_inst.symbols:
+        app_inst.symbols.append(sym)
+        # Initialize strategy for new symbol
+        try:
+            strategy = app_inst.production_orchestrator.create_enhanced_strategy(
+                symbol=sym,
+                order_sizing_strategy="percentage",
+                portfolio_pct=0.05,
+                golden_cross_enabled=True,
+                short_term_patterns_enabled=True,
+                rsi_enabled=True,
+                macd_enabled=True,
+                bb_enabled=True,
+                sma_crossover_enabled=True,
+                ema_enabled=True,
+                volume_analysis_enabled=True
+            )
+            app_inst.trading_strategies[sym] = strategy
+            print(f"[UI] Added & initialized strategy for {sym}")
+            # Kick off model training if none exists
+            try:
+                existing = app_inst.production_orchestrator.model_manager.list_models(sym)
+                if not existing:
+                    print(f"[UI] No existing model for {sym} - starting training")
+                    # Trigger model training asynchronously and the algorithm should be based on config. Create a method in orchestrator
+                    asyncio.create_task(
+                        app_inst.production_orchestrator.train_ml_model(symbol=sym, algorithm='RandomForest', training_period_days=365)
+                    )
+                else:
+                    print(f"[UI] Model already exists for {sym}, skipping training")
+            except Exception as e:
+                print(f"[UI] Model training trigger failed for {sym}: {e}")
+        except Exception as e:
+            print(f"[UI] Failed to init strategy for {sym}: {e}")
+            app_inst.trading_strategies[sym] = None
+    return RedirectResponse('/paper', status_code=303)
+
+@app.post('/paper/reset')
+async def reset_paper_account():
+    app_inst = await get_paper_app()
+    account = app_inst.account
+    success = await account.reset_account_state()
+    status = 'reset=success' if success else 'reset=failed'
+    return RedirectResponse(f'/paper?{status}', status_code=303)
 
 @app.get('/paper/api/summary')
 async def api_summary():
-    account = await get_paper_account()
-    return JSONResponse(account.get_performance_summary())
+    app_inst = await get_paper_app()
+    return JSONResponse(app_inst.account.get_performance_summary())
 
 @app.get('/paper/api/transactions')
 async def api_transactions():
-    account = await get_paper_account()
-    return JSONResponse([t.to_dict() for t in account.get_transactions()][-200:][::-1])
+    app_inst = await get_paper_app()
+    return JSONResponse([t.to_dict() for t in app_inst.account.get_transactions()][-200:][::-1])
 
 # Graceful shutdown
 @app.on_event('shutdown')
 async def shutdown_event():
-    global _paper_account
-    if _paper_account:
-        await _paper_account.disconnect()
+    global _paper_app
+    if _paper_app and _paper_app.account:
+        await _paper_app.disconnect_account()
 
 # Entry point for uvicorn
 if __name__ == '__main__':
